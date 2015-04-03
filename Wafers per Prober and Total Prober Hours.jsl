@@ -1,0 +1,366 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Probe Cycle Time Reporting.jsl
+
+Created by DThor on 2014-10-20
+
+Purpose:
+This script is used for reporting On-Wafer cycle times and
+related statistics. It connects to the WIPTrac database
+to pull all the required data.
+
+Currently Reports:
+	Start to Ink cycle time for the last N days
+	Start to PTD cycle time for xthe last N days
+	Pareto of location of lots at probe
+	Pareto of location of wafers at probe
+	LotType vs Cycle Time, with Mask as Color
+	Amount of additional time needed for PTD (PTD - Inking)
+		by mask
+		by lot type
+	Run Chart of PTD Cycle Time by probe start, labeled by lot ID.
+
+Things to add:
+	TimeToInk vs TimeToPTD
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+//start_date = "2014-12-01";
+//end_date = "2015-02-01";
+days = 30;
+
+// utilizationRatio Defines how many hrs/period to actually count.
+// For example: in a given week (24*7=168hrs), people are running probers for
+// 10hrs/day, 5days/wk = 50hrs. So utilizationRatio = 50/168 = .29762
+utilizationRatio = (10*5)/168;		// 10hrs/day, 5 days/wk
+utilizationRatio = 5/7; 			// 24hrs/day, 5 days/wk
+utilizationRatio = (12*6)/168;		// 12hrs/day, 6 days/wk
+hrsPerDay = utilizationRatio * 24;
+hrsPerWeek = utilizationRatio * 168;
+
+// Database connection string
+conn = "DSN=OWT;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+// If using 64-bit JMP
+conn = "DSN=OWT_x64;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+// ------------------------------------------------------
+// Prober Statistics
+//
+// Data Returned per prober:
+//   1) how many total tests were run on it.
+//   2) how many unique growths were run.
+//   3) how long the prober was in use
+// 
+// ------------------------------------------------------
+
+query = "
+SELECT
+	prober,
+	growth_id,
+	test_time,
+	`start`
+FROM
+	owt.log
+WHERE
+	`start` > '{start}'
+	/*AND `start` < '[]'*/
+	AND aborted = 0
+	AND operator != 'VI Test'
+	AND growth_id != ''
+    AND prober != 'Laptop'
+";
+
+// Determine the start date and insert it into the query
+start_date = Format(Today() - days*24*3600, "yyyy-mm-dd");
+Substitute Into(query, "{start}", Format(Today() - days*24*3600, "yyyy-mm-dd"));
+//Substitute Into(query, "{}", start_date);
+//Substitute Into(query, "[]", end_date);
+
+// Thing
+//name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+
+// Substitute("PTD CT by Mask, Last {} days", "{}", Char(days))
+
+//Show(query);
+
+dt1 = Open Database(conn, query, "ProberStats");
+dt1 << Delete Table Property("Save To DB");
+Column( "prober" ) << Modeling Type( "Ordinal" );
+
+// In order to get the statistics I want, I need to take a summary of a summary.
+// Not ideal, but I can't currently think of a better way to do this.
+// Perhaps I'll eventually revisit it.
+
+dt2 = dt1 << Summary(
+	Group( :prober, :growth_id ),
+	Sum( :test_time ),
+	Link to original data table( 0 )
+);
+
+dt3 = dt2 << Summary(
+	Group( :prober ),
+	Sum( :Name( "Sum(test_time)" ) ),
+	Sum( :N Rows ),
+	Link to original data table( 0 )
+);
+
+Close(dt1, NoSave);
+Close(dt2, NoSave);
+dt1 = dt3;
+
+Column("Sum(Sum(test_time))") << Set Name("Probe Time (s)");
+Column("N Rows") << Set Name("Unique Growths");
+Column("Sum(N Rows)") << Set Name("Total Tests");
+
+// Make a column for the prober type
+proberTypeCol = dt1 << New Column( "ProberType" );
+proberTypeCol << Set Formula(
+	Match(:prober,
+		"1", "Engr",
+		"2", "Prod",
+		"3", "Prod",
+		"4", "Prod",
+		"6", "75 Castilian",
+		"7", "Prod",
+		"9", "Prod",
+		:prober
+	)
+);
+proberTypeCol << EvalFormula;
+
+// Get rid of the Unknown prober.
+dt1 << Select Where( :prober == "Unknown" );
+dt1 << Exclude(1);
+dt1 << Hide(1);
+dt1 << Clear Row Selection;
+
+
+//dt3 << Rename Column( "Sum(Sum(test_time))", "Probe Time (s)" );
+//dt3 << Rename Column( "N Rows", "Unique Growths" );
+//dt3 << Rename Column( "Sum(N Rows)", "Total Tests" );
+
+timeCol = dt1 << New Column( "Probe Time (hr)" );
+timeCol << Set Formula(
+	:Name( "Probe Time (s)" ) / 3600
+);
+timeCol << EvalFormula;
+
+// A column for the total number of hours between Start and End times
+availHrsCol = dt1 << New Column( "Available Hrs" );
+availHrsCol << Set Formula(
+	Date Difference(
+		Informat(start_date, "YYYY-MM-DD"),
+		//Informat(end_date, "YYYY-MM-DD"),
+		Today(),
+		"Hour",
+		"fractional"	
+	)
+);
+availHrsCol << EvalFormula;
+
+// A column for each prober's utilization
+utilCol = dt1 << New Column( "Utilization (%)" );
+utilCol << Set Formula(
+	:Name( "Probe Time (hr)" ) / (utilizationRatio * :Name( "Available Hrs" )) * 100
+);
+utilCol << EvalFormula;
+
+// Plot up the number of wafers each prober processed
+//name = "Unique Growths & Total Tests By Prober";
+name = Substitute("Unique Growths & Total Tests By Prober, Last {} days", "{}", Char(days));
+//name ||= "\!N " || start_date || " to " || end_date;
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Graph Builder(
+	Size( 575, 475 ),
+	Show Control Panel( 0 ),
+	Variables(
+		X( :prober ),
+		Y( :Unique Growths ),
+		Y( :Total Tests, Position( 1 ) )
+	),
+	Elements(
+		Bar(
+			X,
+			Y( 2 ),
+			Legend( 2 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Sum" ),
+			Label( "Value" )
+		),
+		Bar(
+			X,
+			Y( 1 ),
+			Legend( 3 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Sum" ),
+			Label( "Value" )
+		)
+	),
+	Dispatch(
+		{},
+		"graph title",
+		TextEditBox,
+		{Set Text( name )}
+	),
+	SendToReport( Dispatch( {}, "Y title", TextEditBox, {Set Text( "Count" )} ) )
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Wafers per Prober");
+
+// Plot up how much time each prober was used, stacked so that the sum is seen.
+//name = "Prober Hrs";
+//name ||= "\!N" || start_date || " to " || end_date;
+//name = "Unique Growths & Total Tests By Prober";
+name =Substitute("Prober Hrs, Last {} days", "{}", Char(days));
+//name ||= "\!N " || start_date || " to " || end_date;
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Graph Builder(
+	Size( 200, 420 ),
+	Show Control Panel( 0 ),
+	Categorical Color Theme( "Universal" ),
+	Variables( Y( :Name( "Probe Time (hr)" ) ), Overlay( :prober ) ),
+	Elements(
+		Bar(
+			Y,
+			Legend( 2 ),
+			Bar Style( "Stacked" ),
+			Summary Statistic( "Mean" ),
+			Label( "Value" )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"Probe Time (hr)",
+			ScaleBox,
+			{Min( 0 ), Minor Ticks( 4 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		)
+	),
+	Dispatch(
+		{},
+		"graph title",
+		TextEditBox,
+		{Set Text( name )}
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Prober Test Time");
+//Close(dt1, NoSave);
+
+// Plot up prober utilization
+//name = "Prober Utilization";
+//name ||= "\!N" || start_date || " to " || end_date;
+name =Substitute("Prober Utilization, Last {n} days\!N(Assuming {hr} hrs per week)", "{n}", Char(days), "{hr}", Char(hrsPerWeek, 6, 1));
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Graph Builder(
+	Size( 475, 280 ),
+	Show Control Panel( 0 ),
+	Variables(
+		X( :prober ),
+		Y( :Name( "Utilization (%)" ) ),
+		Color( :ProberType )
+	),
+	Elements(
+		Bar(
+			X,
+			Y,
+			Legend( 3 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Mean" ),
+			Label( "Value" )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"Utilization (%)",
+			ScaleBox,
+			{Min( 0 ), Inc( 5 ), Minor Ticks( 4 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		)
+	),
+	Dispatch(
+		{},
+		"graph title",
+		TextEditBox,
+		{Set Text( name )}
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Prober Utilization");
+//Close(dt1, NoSave);
+
+// A Table grouping things by prober type
+dt2 = dt1 << Summary(
+	Group( :ProberType ),
+	Sum( :Name( "Probe Time (hr)" ) ),
+	Sum( :Available Hrs ),
+	statistics column name format( "column" ),
+	Link to original data table( 0 )
+);
+
+// A column for each prober types's utilization
+/*
+utilCol = dt1 << New Column( "Utilization (%)" );
+utilCol << Set Formula(
+	:Name( "Probe Time (hr)" ) / (utilizationRatio * :Name( "Available Hrs" )) * 100
+);
+utilCol << EvalFormula;
+*/
+
+Close(dt2, NoSave);
+
+// Plot up utilization by ProberType
+//name = "ProberType Utilization";
+//name ||= "\!N" || start_date || " to " || end_date;
+name = Substitute("ProberType Utilization, Last {n} days\!N(Assuming {hr} hrs per week)", "{n}", Char(days), "{hr}", Char(hrsPerWeek, 6, 1));
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Graph Builder(
+	Size( 400, 280 ),
+	Show Control Panel( 0 ),
+	Variables(
+		X( :ProberType ),
+		Y( :Name( "Utilization (%)" ) ),
+		Color( :ProberType )
+	),
+	Elements(
+		Bar(
+			X,
+			Y,
+			Legend( 2 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Mean" ),
+			Label( "Value" )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"Utilization (%)",
+			ScaleBox,
+			{Min( 0 ), Inc( 5 ), Minor Ticks( 4 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		)
+	),
+	Dispatch(
+		{},
+		"graph title",
+		TextEditBox,
+		{Set Text( name )}
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "ProberType Utilization");
+//Close(dt1, NoSave);

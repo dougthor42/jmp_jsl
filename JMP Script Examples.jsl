@@ -1,0 +1,71 @@
+////////////////////////////////////////////////////////////
+// Mark by Buffer Type
+////////////////////////////////////////////////////////////
+Current Data Table() << Color by Column(
+	Buffer,
+	Color( 0 ),
+	Color Theme( "" ),
+	Marker( 1 ),
+	Marker Theme( "Solid" ),
+	Continuous Scale( 0 ),
+	Reverse Scale( 0 ),
+	Excluded Rows( 1 )
+);
+
+
+
+////////////////////////////////////////////////////////////
+// Color by Radius
+////////////////////////////////////////////////////////////
+Current Data Table() << Color by Column(
+	Name( "Radius (mm)" ),
+	Color( 1 ),
+	Color Theme( "Blue to Gray to Red" ),
+	Marker( 0 ),
+	Marker Theme( "" ),
+	Continuous Scale( 1 ),
+	Reverse Scale( 0 ),
+	Excluded Rows( 0 )
+);
+
+
+////////////////////////////////////////////////////////////
+// Remove Invalid Points
+////////////////////////////////////////////////////////////
+dt = Current Data Table();
+dt << Select Where(
+	:Test # > 1 |
+	:Name( "Mobility @ 25C" ) >= 2400 |
+	:Mathematica Hall xAl <= 0.23 |
+	:Name( "VDP R1/R2" ) >= 1.01 |
+	:Name( "VDP R1/R2" ) <= 0.99 |
+	:Name( "Hall V1/V2" ) >= 1.1 |
+	:Name( "Hall V1/V2" ) <= 0.9
+);
+For Each Row(
+	If( Selected( Row State() ) == 1,
+		Hidden( Row State() ) = 1;
+		Excluded( Row State() ) = 1;
+	)
+);
+dt << Clear Select;
+
+
+////////////////////////////////////////////////////////////
+// Prompt User
+////////////////////////////////////////////////////////////
+a =	New Window(
+		"Enter the Reedholm Lot ID:",
+		<< Modal,
+		Text Box("Enter the Reedholm Lot ID:"),
+		editBox = Number Edit Box(),
+		Button Box( "OK" ),
+		Button Box( "Cancel" )
+);
+If( a["Button"] == -1,
+	Throw()
+);
+
+// Get the contents of the Number Edit Box
+lot_id = editBox << get;
+Show(lot_id)

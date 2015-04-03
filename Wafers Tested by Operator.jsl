@@ -1,0 +1,182 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Probe Cycle Time Reporting.jsl
+
+Created by DThor on 2014-10-20
+
+Purpose:
+This script is used for reporting On-Wafer cycle times and
+related statistics. It connects to the WIPTrac database
+to pull all the required data.
+
+Currently Reports:
+	Start to Ink cycle time for the last N days
+	Start to PTD cycle time for xthe last N days
+	Pareto of location of lots at probe
+	Pareto of location of wafers at probe
+	LotType vs Cycle Time, with Mask as Color
+	Amount of additional time needed for PTD (PTD - Inking)
+		by mask
+		by lot type
+	Run Chart of PTD Cycle Time by probe start, labeled by lot ID.
+
+Things to add:
+	TimeToInk vs TimeToPTD
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+//start_date = "2014-11-01";
+//end_date = "2015-02-01";
+days = 30;
+
+
+// ------------------------------------------------------
+// Functions
+// ------------------------------------------------------
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Cycle Time - Inking and PTD
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// Database connection string
+conn = "DSN=OWT;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+// If using 64-bit JMP
+conn = "DSN=OWT_x64;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+// ------------------------------------------------------
+// Operator Statistics
+// ------------------------------------------------------
+
+query = "
+SELECT
+	operator,
+	Count(operator)
+FROM
+	owt.log
+WHERE
+	`start` >= '{start}'
+	/*AND `end` < '[]'*/
+	AND aborted = 0
+	AND operator not like 'VI Test'
+	AND growth_id != ''
+GROUP BY
+	operator
+";
+
+// Determine the start date and insert it into the query
+start_date = Format(Today() - days*24*3600, "yyyy-mm-dd");
+Substitute Into(query, "{start}", start_date);
+//Substitute Into(query, "[]", end_date);
+
+//Show(query);
+
+dt1 = Open Database(conn, query, "OperatorStats");
+dt1 << Delete Table Property("Save To DB");
+
+operatorCol = dt1 << New Column("Operator");
+// Update this formula whenever there are new typos in names
+operatorCol << Set Formula (
+	Match(Trim(Uppercase(:operator)),
+		"ALBERTOS", "Alberto S.",
+		"BB", "Brian B.",
+		"BRIAN SWENSON", "Brian S.",
+		"CN", "Carl N.",
+		"CARL", "Carl N.",
+		"CARLN", "Carl N.",
+		"CN_ML", "Carl N.",
+		"DAVID T", "David T.",
+		"DAVIT", "David T.",
+		"DAVIDT", "David T.",
+		"DAVCID TORREROS", "David T.",
+		"DAVID TORREROS", "David T.",
+		"DAVID TORRROS", "David T.",
+		"DAVID TOREROS", "David T.",
+		"DAVID TORREOS", "David T.",
+		"DAVIS TORREROS", "David T.",
+		"DAVID TORREROD", "David T.",
+		"DAVID TOORREROS", "David T.",
+		"DR", "David R.",
+		"DG", "Dietrich G.",
+		"DIETRICH G", "Dietrich G.",
+		"DOUGLAS THOR", "Douglas T.",
+		"DOGULAS THOR", "Douglas T.",
+		"SMH", "Stephanie H.",
+		"SEON", "Seon K.",
+		"SK", "Seon K.",
+		"MO", "Mo W.",
+		"MW", "Mo W.",
+		"RL", "Ronaldo L.",
+		"RM", "Rosario M.",
+		"RW", "Ronghua W.",
+		"RR", "Ronghua W.",
+		"LF", "Lenny F.",
+		"MICHELLE", "Michelle L.",
+		"RON BIR", "Ron B.",
+		"RONB", "Ron B.",
+		:operator)
+	);
+operatorCol << EvalFormula;
+
+// Plot up Bar Chart
+//name = "Wafers Tested by Operator\!NLast {} days";
+//name ||= "\!NLast {} days";
+name = Substitute("Wafers Tested by Operator, Last {} days", "{}", Char(days));
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+
+obj = dt1 << Graph Builder(
+	Size( 450, 325 ),
+	Show Control Panel( 0 ),
+	Show Legend( 0 ),
+	Variables( X( :Operator ), Y( :Name( "Count(operator)" ) ) ),
+	Elements(
+		Bar(
+			X,
+			Y,
+			Legend( 2 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Sum" ),
+			Label( "Value" )
+		),
+		Caption Box(
+			X,
+			Y,
+			Legend( 3 ),
+			Summary Statistic( "Sum" ),
+			X Position( "Right" ),
+			Y Position( "Top" )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"Operator",
+			ScaleBox,
+			{Show Major Grid( 1 ), Show Minor Grid( 1 ),
+			Rotated Labels( "Perpendicular" )}
+		),
+		Dispatch(
+			{},
+			"graph title",
+			TextEditBox,
+			{Set Text( name )}
+		),
+		Dispatch( {}, "Y title", TextEditBox, {Set Text( "Wafers" )} )
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Operator Moves");
+
+//Close(dt1, NoSave);

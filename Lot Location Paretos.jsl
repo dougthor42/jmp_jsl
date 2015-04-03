@@ -1,0 +1,209 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Probe Cycle Time Reporting.jsl
+
+Created by DThor on 2014-10-20
+
+Purpose:
+This script is used for reporting On-Wafer cycle times and
+related statistics. It connects to the WIPTrac database
+to pull all the required data.
+
+Currently Reports:
+	Start to Ink cycle time for the last N days
+	Start to PTD cycle time for xthe last N days
+	Pareto of location of lots at probe
+	Pareto of location of wafers at probe
+	LotType vs Cycle Time, with Mask as Color
+	Amount of additional time needed for PTD (PTD - Inking)
+		by mask
+		by lot type
+	Run Chart of PTD Cycle Time by probe start, labeled by lot ID.
+
+Things to add:
+	TimeToInk vs TimeToPTD
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+days = 30;
+
+// Database connection string
+conn = "DSN=PostgreSQL30;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// If using 64-bit JMP
+conn = "DSN=PostgreSQL30_x64;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// ------------------------------------------------------
+// Functions
+// ------------------------------------------------------
+
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Location of All Lots at Probe
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// 1329 = TRANSFER TO PROBE_6H (970000)
+// 1339 = PTD_SHIP_6H (980000)
+query = "
+WITH
+    t1 AS (
+        SELECT
+			op_id,
+			op_num,
+			op_name,
+			charge_num
+		FROM public.op
+		WHERE charge_num = 'TEST'
+	),
+    t2 AS (
+        SELECT
+			device_id,
+			part_id,
+			op_id,
+			inv
+        FROM public.indx
+	),
+	t3 AS (
+		SELECT
+			device_id,
+			part_id,
+			lot_num
+		FROM public.device
+	),
+	t4 AS (
+		SELECT
+			part_id,
+			partnum,
+			partrev
+		FROM public.part
+	)
+SELECT
+	*
+FROM t1
+INNER JOIN t2 ON
+	t1.op_id = t2.op_id
+INNER JOIN t3 ON
+	t2.device_id = t3.device_id
+INNER JOIN t4 ON
+	t2.part_id = t4.part_id
+";
+
+// Insert the start date
+Substitute Into(query, "{}", Format(Today() - days*24*3600, "yyyy-mm-dd"));
+
+// Execute the query
+dt1 = Open Database(conn, query, "Lots at Probe");
+
+// Delete the Save to DB script so that we don't accidentally
+// overwrite things (though I'm pretty sure the ODBC
+// connection parameter is read-only anyway)
+dt1 << Delete Table Property("Save To DB");
+
+
+// ------------------------------------------------------
+// Add Columns
+// ------------------------------------------------------
+
+// Add a columnn for the Mask, taken from partnum
+maskCol = dt1 << New Column("Mask");
+maskCol << Set Formula( Substr(:partnum, 5, 5) );
+maskCol << EvalFormula;
+
+// Join the OpNum and OpName so that things are sorted correctly
+operationCol = dt1 << New Column("Operation");
+operationCol << Set Formula( Char(:op_num) || " " || :op_name );
+operationCol << EvalFormula;
+
+// ------------------------------------------------------
+// Plotting
+// ------------------------------------------------------
+
+// Pareto of how many lots are at each operation.
+name = "Pareto of Lots by Operation";
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Pareto Plot(
+	Cause( :op_name ),
+	N Legend( 1 ),
+	SendToReport(
+	Dispatch(
+			{},
+			"Plots",
+			OutlineBox,
+			{Set Title( name )}
+		),
+		Dispatch( {"Plots"}, "Pareto", FrameBox, {Frame Size( 300, 200 )} )
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Pareto Plot", "Location Pareto - Lots");
+
+name = "Pareto of Wafers by Operation";
+name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+// Pareto of how many *wafers* are at each operation.
+obj = dt1 << Pareto Plot(
+	Cause( :op_name ),
+	Freq( :inv ),
+	N Legend( 1 ),
+	SendToReport(
+	Dispatch(
+			{},
+			"Plots",
+			OutlineBox,
+			{Set Title( name )}
+		),
+		Dispatch( {"Plots"}, "Pareto", FrameBox, {Frame Size( 300, 200 )} )
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Pareto Plot", "Location Pareto - Wafers");
+
+// Tabulate # Lots in inventory
+obj = dt1 << Tabulate(
+	Invisible,
+	Show Control Panel( 0 ),
+	Add Table(
+		Column Table( Grouping Columns( :Mask ), Add Aggregate Statistics( :Mask ) ),
+		Row Table(
+			Grouping Columns( :Operation ),
+			Add Aggregate Statistics( :Operation )
+		)
+	),
+	SendToReport(
+		Dispatch( {}, "Tabulate", OutlineBox, {Set Title( "Lot Counts" )} )
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Tabulate", "Table - Lots");
+
+// Tabulate # wafers in inventory
+obj = dt1 << Tabulate(
+	Invisible,
+	Freq( :inv ),
+	Show Control Panel( 0 ),
+	Add Table(
+		Column Table( Grouping Columns( :Mask ), Add Aggregate Statistics( :Mask ) ),
+		Row Table(
+			Grouping Columns( :Operation ),
+			Add Aggregate Statistics( :Operation )
+		)
+	),
+	SendToReport(
+		Dispatch( {}, "Tabulate", OutlineBox, {Set Title( "Wafer Counts" )} )
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Tabulate", "Table - Wafers");
+
+//Close(dt1, NoSave);

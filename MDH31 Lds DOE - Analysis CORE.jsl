@@ -1,0 +1,460 @@
+/*
+---------------------------------------------
+MDH31 Lds DOE - Analysis CORE.jsl
+
+Original query created by R. Barr, 2014-04-29
+Modified for JMP by D. Thor on 2014-04-30
+
+Usage:
+Edit the 'lot_name' string to query different lots.
+
+Description:
+Script will stack the data into Parameter-Value columns and add a radius column and a DOE device name column for looking at MDH31 DOE data. It will then perform hard-spec screens on the data and create a Yield table, which contains the fallout percentage for each parameter.
+---------------------------------------------
+*/
+
+Names Default To Here(1);
+
+// Define the DBTool database connection string
+conn = "DSN=PowerSQL_x64;UID=guang;PWD=wu1204;SERVER={115-db};DATABASE=test;PORT=3306;";
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Edit this to find different lots
+// Seperate multiple lots with a single comma ','
+// Example: "1433-1,1433-1.1"
+lot_name = "1433-1,1433-1.1";
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// Prompt user for Lot IDs
+a =	New Window(
+		"Enter the Lot IDs:",
+		<< Modal,
+		Text Box("Enter the Lot IDs:"),
+		lot_name = Text Edit Box( lot_name ),
+		Button Box( "OK" ),
+		Button Box( "Cancel" )
+);
+If( a["Button"] == -1,
+	Throw()
+);
+
+
+// If multiple lots are listed, then I need to change the query string
+lot_list = Munger(lot_name << Get Text, 0, ",", "' OR tbl_test.LotNum = '");
+
+// Generate the WHERE clause for the query
+where_clause = "tbl_test.LotNum = '" || lot_list || "'";
+Show(where_clause);
+
+
+
+query = "
+SELECT
+	tbl_test.Lot,
+	tbl_test.LotNum,
+	tbl_test.Wafer,
+	tbl_test.SubstrateID,
+	tbl_test.Process_Step,
+	tbl_test.TestNum,
+	tbl_test.GrowthPart,
+	tbl_attribute.MeasID,
+	tbl_attribute.TestID,
+	tbl_attribute.Die_Row,
+	tbl_attribute.Die_Col,
+	tbl_attribute.TestType,
+	tbl_attribute.VB01,
+	tbl_attribute.VB1,
+	tbl_attribute.Rsh_Cal,
+	tbl_attribute.Ron50,
+	tbl_attribute.ID_BD50,
+	tbl_attribute.ID_BD100,
+	tbl_attribute.ID_BD200,
+	tbl_attribute.ID_BD400,
+	tbl_attribute.ID_BD480,
+	tbl_attribute.ID_BD600,
+	tbl_attribute.ID_BD650,
+	tbl_attribute.ID_BD700,
+	tbl_attribute.IG_BD50,
+	tbl_attribute.IG_BD100,
+	tbl_attribute.IG_BD200,
+	tbl_attribute.IG_BD400,
+	tbl_attribute.IG_BD480,
+	tbl_attribute.IG_BD600,
+	tbl_attribute.IG_BD650,
+	tbl_attribute.IG_BD700,
+	tbl_attribute.Switch_Ron500_100V,
+	tbl_attribute.Vps1
+FROM (tbl_test INNER JOIN tbl_attribute ON tbl_test.MeasID = tbl_attribute.MeasID)
+WHERE tbl_test.Process_Step = 'm3' AND ";
+
+// Combine the Select clause with the Where clause
+sql_string1 = query || where_clause;
+
+// Print the final query string to the Log window
+Show(sql_string1);
+
+// Grab the data from the DBTool database
+dt1 = Open Database(conn, sql_string1, "tempTable");
+
+// Organise it into 2 columns: Param and Value
+dt2 = dt1 << Stack(
+	columns(
+		:VB01,
+		:VB1,
+		:Ron50,
+		:ID_BD50,
+		:ID_BD100,
+		:ID_BD200,
+		:ID_BD400,
+		:ID_BD475,
+		:ID_BD480,
+		:ID_BD600,
+		:ID_BD650,
+		:ID_BD700,
+		:IG_BD50,
+		:IG_BD100,
+		:IG_BD200,
+		:IG_BD400,
+		:IG_BD480,
+		:IG_BD600,
+		:IG_BD650,
+		:IG_BD700,
+		:Switch_Ron500_100V,
+		:Rsh_Cal,
+		:Vps1
+	),
+	Source Label Column( "Param" ),
+	Stacked Data Column( "Value" ),
+	Output Table( "data" )
+);
+
+// Close the original table and don't save it - not needed anymore
+Close(dt1, NoSave);
+
+//dt2 = Data Table( "data" );
+
+/*
+// Select and delete any rows where Value is missing
+dt2 << Select Where( Is Missing(:Value) );
+dt2 << delete rows;
+*/
+
+// Add a Radius (mm) column, assume MDH26.
+// Center RC: 24, 31.5
+// Die Size XY: 2.43, 3.3
+radiusCol = dt2 << New Column("Radius (mm)");
+radiusCol << Set Formula(
+	Root((2.43 * (:Die_Col - 31.5)) ^ 2 + (3.3 * (:Die_Row - 24)) ^ 2, Empty())
+);
+
+/*
+// Add a Column for Test Group (Applies to 1433-1 and 1433-1.1 Coss only)
+test_group_col = dt2 << New Column("TestGroup");
+test_group_col << Set Formula(
+	Match(:Wafer, "140119AC-3", "A", "140129CC-4", "A", "140127BC-4", "B", "Error")
+	);
+*/
+
+// Add a Column for DOE Device Name (MDH31)
+dut_name_col = dt2 << New Column("DUT");
+dut_name_col << Set Formula(
+	Match(
+		Modulo(:Die_Col + 1, 6) + 1,
+		1, "A",
+		2, "B",
+		3, "C",
+		4, "D",
+		5, "E",
+		6, "F",
+		"Error")
+	);
+
+// Add a column for Die Pass (1) or Fail (0)
+pass_col = dt2 << New Column("Pass");
+pass_col << Set Formula(
+	If(
+		(
+			// Rdson Spec
+			(
+				:TestNum == 1 &
+				:TestType == "HighIPulse" &
+				:Param == "Ron50" &
+				5 <= :Value <= 14) |
+				
+			// High Temperature HVOS Specs
+			(	// Id_50
+				:TestNum == 1 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "ID_BD50" &
+				0 <= Abs(:Value) <= 2e-4) |
+			(	// Ig_50
+				:TestNum == 1 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "IG_BD50" &
+				0 <= Abs(:Value) <= 1e-6) |
+			(	// Id_480
+				:TestNum == 1 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "ID_BD480" &
+				0 <= Abs(:Value) <= 1.133e-4) |
+				
+			// Room Temperature HVOS Specs
+			(	// Id_50
+				:TestNum == 50 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "ID_BD50" &
+				0 <= Abs(:Value) <= 1e-6) |
+			(	// Ig_50
+				:TestNum == 50 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "IG_BD50" &
+				0 <= Abs(:Value) <= 1e-6) |
+			(	// Id_600
+				:TestNum == 50 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "ID_BD600" &
+				1e-11 <= Abs(:Value) <= 1e-6) |
+			(	// Ig_600
+				:TestNum == 50 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "IG_BD600" &
+				1e-11 <= Abs(:Value) <= 1e-6) |
+
+			// Transfer Curve Vth Spec
+			(	// Vps1 is 0.01uA/mm
+				:TestNum == 50 &
+				:TestType == "TC_HVBD" &
+				:Param == "Vps1" &
+				-27 <= :Value <= -18) |
+
+			// Unofficial specs added just so that the summary Table will have the median values
+			(	// Room Temp Id_700 Spec
+				:TestNum == 50 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "ID_BD700" &
+				1e-15 <= Abs(:Value) <= 1e15) |
+			(	// Room Temp Ig_700 Spec
+				:TestNum == 50 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "IG_BD700" &
+				1e-15 <= Abs(:Value) <= 1e15) |
+			(	// High Temp Id_600 Spec
+				:TestNum == 1 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "ID_BD600" &
+				1e-15 <= Abs(:Value) <= 1e15) |
+			(	// High Temp Ig_600 Spec
+				:TestNum == 1 &
+				:TestType == "HV Breakdown Test v2" &
+				:Param == "IG_BD600" &
+				1e-15 <= Abs(:Value) <= 1e15)
+		),
+		1,
+		0
+	)
+);
+
+// Add a column to take the Log10(Abs(current)) for leakage measurements
+value2_col = dt2 << New Column("Value2");
+value2_col << Set Formula(
+	If(:TestType == "HV Breakdown Test v2", Log10(Abs(:Value)), :Value)
+);
+
+dt2 << Run Formulas;
+
+// Select just the die that pass
+dt2 << Select Where( :Pass == 1 );
+
+// Determine the yield and yield categories by creating a summary table
+Data Table( "data" ) << Summary(
+	Group(
+		:Lot,
+		:LotNum,
+		:Wafer,
+		:SubstrateID,
+		:Process_Step,
+		:TestNum,
+		:GrowthPart,
+		:TestType,
+		:Param,
+		:DUT
+	),
+	Sum( :Pass ),
+	Output Table( "Yield" ),
+	Link to original data table( 1 )
+);
+dtYield = Data Table( "Yield" );
+
+// Add column for Fallout percages
+fallout_col = dtYield << New Column( "Fallout (%)" );
+fallout_col << Set Formula(
+	(1 - (:Name("Sum(Pass)") / :Name("N Rows"))) * 100
+);
+
+// Perform screen by taking a subset of the good values
+dt2 << Subset(
+	Selected Rows(1),
+	Output Table( "Screened Data" )
+	);
+
+dt3 = Data Table( "Screened Data" );
+
+// Create a Summary Table
+dtSummary = dt3 << Summary(
+	Group(
+		:Lot,
+		:LotNum,
+		:Wafer,
+		:SubstrateID,
+		:Process_Step,
+		:TestNum,
+		:GrowthPart,
+		:MeasID,
+		:TestNum 2,
+		:TestType,
+		:Param,
+		:DUT
+	),
+	Median( :Value2 ),
+	Variance( :Value2 ),
+	Output Table( "Summary of Screened Data" ),
+	Link to original data table( 0 )
+);
+
+// Need to delete the N Rows column from dtSummary or else things don't work
+dtSummary << Delete Column(:N Rows);
+
+// Add a wait time so that formulas have time to evaluate.
+Wait(1);
+
+// Update the summary table with the fallout value
+dtSummary << Update(
+	With( dtYield ),
+	Match Columns(
+		:Lot = :Lot,
+		:LotNum = :LotNum,
+		:Wafer = :Wafer,
+		:SubstrateID = :SubstrateID,
+		:Process_Step = :Process_Step,
+		:TestNum = :TestNum,
+		:GrowthPart = :GrowthPart,
+		:TestType = :TestType,
+		:Param = :Param,
+		:DUT = :DUT
+	),
+	Add Columns from Update table(
+		:N Rows,
+		:Name( "Sum(Pass)" ),
+		:Name( "Fallout (%)" )
+	)
+);
+
+// Close the Yield Summary table; we don't need it anymore
+Close(dtYield, NoSave);
+
+// Split the summary table into columns - this will allow us to update the DOE table.
+dtSummarySplit = dtSummary << Split(
+	Split By( :TestNum, :TestType, :Param ),
+	Split(
+		:Name( "Median(Value2)" ),
+		:Name( "Variance(Value2)" ),
+		:Name( "Fallout (%)" )
+	),
+	Group(
+		:Lot,
+		:LotNum,
+		:Wafer,
+		:SubstrateID,
+		:Process_Step,
+		:GrowthPart,
+		:DUT
+	),
+	Remaining Columns( Drop All ),
+	Output Table( "for Joining" )
+);
+
+Wait(1);
+
+// Rename a bunch of columns...
+// Median Columns
+Column( "Median(Value2) 1 HighIPulse Ron50" ) << Set Name("Median_Ron") << dtSummarySplit;
+
+Column( "Median(Value2) 1 HV Breakdown Test v2 ID_BD480" ) << Set Name("Median_HT_Id480") << dtSummarySplit;
+Column( "Median(Value2) 1 HV Breakdown Test v2 ID_BD50" ) << Set Name("Median_HT_Id50") << dtSummarySplit;
+Column( "Median(Value2) 1 HV Breakdown Test v2 ID_BD600" ) << Set Name("Median_HT_Id600") << dtSummarySplit;
+Column( "Median(Value2) 1 HV Breakdown Test v2 IG_BD50" ) << Set Name("Median_HT_Ig50") << dtSummarySplit;
+Column( "Median(Value2) 1 HV Breakdown Test v2 IG_BD600" ) << Set Name("Median_HT_Ig600") << dtSummarySplit;
+
+Column( "Median(Value2) 50 HV Breakdown Test v2 ID_BD50" ) << Set Name("Median_Id50") << dtSummarySplit;
+Column( "Median(Value2) 50 HV Breakdown Test v2 ID_BD600" ) << Set Name("Median_Id600") << dtSummarySplit;
+Column( "Median(Value2) 50 HV Breakdown Test v2 ID_BD700" ) << Set Name("Median_Id700") << dtSummarySplit;
+Column( "Median(Value2) 50 HV Breakdown Test v2 IG_BD50" ) << Set Name("Median_Ig50") << dtSummarySplit;
+Column( "Median(Value2) 50 HV Breakdown Test v2 IG_BD600" ) << Set Name("Median_Ig600") << dtSummarySplit;
+Column( "Median(Value2) 50 HV Breakdown Test v2 IG_BD700" ) << Set Name("Median_Ig700") << dtSummarySplit;
+Column( "Median(Value2) 50 TC_HVBD Vps1" ) << Set Name("Median_Vth") << dtSummarySplit;
+
+// Fallout Columns
+Column( "Fallout (%) 1 HighIPulse Ron50" ) << Set Name("Fallout_Ron") << dtSummarySplit;
+
+Column( "Fallout (%) 1 HV Breakdown Test v2 ID_BD480" ) << Set Name("Fallout_HT_Id480") << dtSummarySplit;
+Column( "Fallout (%) 1 HV Breakdown Test v2 ID_BD50" ) << Set Name("Fallout_HT_Id50") << dtSummarySplit;
+Column( "Fallout (%) 1 HV Breakdown Test v2 ID_BD600" ) << Set Name("Fallout_HT_Id600") << dtSummarySplit;
+Column( "Fallout (%) 1 HV Breakdown Test v2 IG_BD50" ) << Set Name("Fallout_HT_Ig50") << dtSummarySplit;
+Column( "Fallout (%) 1 HV Breakdown Test v2 IG_BD600" ) << Set Name("Fallout_HT_Ig600") << dtSummarySplit;
+
+Column( "Fallout (%) 50 HV Breakdown Test v2 ID_BD50" ) << Set Name("Fallout_Id50") << dtSummarySplit;
+Column( "Fallout (%) 50 HV Breakdown Test v2 ID_BD600" ) << Set Name("Fallout_Id600") << dtSummarySplit;
+Column( "Fallout (%) 50 HV Breakdown Test v2 ID_BD700" ) << Set Name("Fallout_Id700") << dtSummarySplit;
+Column( "Fallout (%) 50 HV Breakdown Test v2 IG_BD50" ) << Set Name("Fallout_Ig50") << dtSummarySplit;
+Column( "Fallout (%) 50 HV Breakdown Test v2 IG_BD600" ) << Set Name("Fallout_Ig600") << dtSummarySplit;
+Column( "Fallout (%) 50 HV Breakdown Test v2 IG_BD700" ) << Set Name("Fallout_Ig700") << dtSummarySplit;
+
+Column( "Fallout (%) 50 TC_HVBD Vps1" ) << Set Name("Fallout_Vth") << dtSummarySplit;
+
+/*
+Stuff that was used as an example for R. Barr and P. Smith
+
+// Exclude and hide all but the TestNum 50 Id_600 data
+dt2 << Data Filter(
+	Location( {856, 175} ),
+	Add Filter(
+		columns( :TestNum, :TestType, :Parameter ),
+		Where( :TestNum >= 50 & :TestNum <= 50 ),
+		Where( :TestType == "HV Breakdown Test v2" ),
+		Where( :Parameter == "ID_BD600" ),
+		Display( :TestType, Size( 204, 174 ), List Display ),
+		Display( :Parameter, Size( 221, 259 ), List Display )
+	),
+	Mode( Show( 1 ), Include( 1 ) )
+);
+*/
+
+/*
+// Plot up Log10(Id_600) by Radius, colored by Buffer
+// This was first done in the GraphBuilder, and then the script was just copied to here.
+// (That's how I do most of my scripting...)
+Graph Builder(
+	Show Control Panel( 0 ),
+	Variables( X( :Name( "Radius (mm)" ) ), Y( :Value ), Color( :GrowthPart ) ),
+	Elements( Points( X, Y, Color, Legend( 5 ) ) ),
+	SendToReport(
+		Dispatch(
+			{},
+			"Value",
+			ScaleBox,
+			{	Scale( "Log" ),
+				Format( "Scientific", 12 ),
+				Min( 0.00000001 ),
+				Max( 100 ),
+				Inc( 1 ),
+				Minor Ticks( 8 ),
+				Show Major Grid( 1 ),
+				Show Minor Grid( 0 ),
+				Label Minor Tick Marks On Log Axis( 0 )
+			}
+		)
+	)
+)
+*/

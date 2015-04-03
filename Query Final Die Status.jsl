@@ -1,0 +1,13 @@
+/*
+
+You need join tables tbl_test and tbl_attribute
+
+for example
+
+Select t1.wafer,t2.die_row,t2.die_col,t2.diestate from tbl_test as t1 inner join tbl_attribute as t2 on t1.measid=t2.measid where t1.wafer='XXXXX' and t1.testnum=50 and t2.testtype like 'HV Break%'
+
+
+Replace XXXXX with your waferid,  column diestate is the dies' defect code.
+
+
+*/

@@ -1,0 +1,249 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Wafers through Each Step.jsl
+
+Created by DThor on 2014-11-06
+
+Purpose:
+This script is used for reporting total wafers through the various probe steps.
+
+Currently Reports:
+	Number of wafers through each step (determined by step_ids)
+	Summary table showing Sum of each wafer through each step, by month.
+
+Things to add:
+	Step utilization
+		how many wafers were taken through step / how many wafers were started
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+days = 120;
+start_date = "2014-11-01";
+
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Number of Wafers through each step
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// Database connection string
+conn = "DSN=PostgreSQL30;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// If using 64-bit JMP
+conn = "DSN=PostgreSQL30_x64;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// 1329 = TRANSFER TO PROBE_6H (970000)
+// 1336 = TEST_INKING_6H-M3T (977000)
+// 1339 = PTD_SHIP_6H (980000)
+// 1333 = TEST_LEAK_VTH_6H-M3T (974000)
+step_ids = "(1329, 1333, 1336, 1339)";
+
+query = "
+WITH
+    t1 AS (
+        SELECT
+			device_id,
+			op_id,
+			date_out,
+			starts
+        FROM public.history
+        WHERE op_id IN [] AND date_out >= '{}'
+        )
+SELECT
+	t1.device_id,
+	t2.lot_num,
+	t3.partnum,
+	t3.partrev,
+	t4.lottype,
+	t1.op_id,
+	t5.op_num,
+	t5.op_name,
+	t1.date_out AS date_out,
+	t1.starts AS wafers_out
+FROM t1
+INNER JOIN public.device AS t2 ON
+t1.device_id = t2.device_id
+INNER JOIN public.part AS t3 ON
+t2.part_id = t3.part_id
+INNER JOIN public.lottype AS t4 ON
+t2.lottype_id = t4.lottype_id
+INNER JOIN public.op AS t5 ON
+t1.op_id = t5.op_id
+";
+
+// Insert the start date
+Substitute Into(
+	query,
+	//"{}", Format(Today() - days*24*3600, "yyyy-mm-dd"),
+	"{}", start_date,
+	"[]", step_ids
+);
+
+//Show(query);
+
+// Execute the query
+dt1 = Open Database(conn, query, "Wafers Out by Step");
+
+// Delete the Save to DB script so that we don't accidentally
+// overwrite things (though I'm pretty sure the ODBC
+// connection parameter is read-only anyway)
+dt1 << Delete Table Property("Save To DB");
+
+
+// ------------------------------------------------------
+// Add Columns
+// ------------------------------------------------------
+
+// Add a columnn for the Mask, taken from partnum
+maskCol = dt1 << New Column("Mask", Character);
+maskCol << Set Formula( Substr(:partnum, 5, 5) );
+maskCol << EvalFormula;
+
+// Add a columnn for the Short LotType, taken from lottype
+typeCol = dt1 << New Column("Lot Type", Character);
+typeCol << Set Formula(
+	Match(
+		:lottype,
+		"QUAL", "QUAL",
+		"ENGINEERING", "ENGR",
+		"PRODUCTION", "PROD",
+		"DOWNGRADE", "DOWN",
+		"EQUIPMENT", "EQUIP",
+		"MONITOR", "MON",
+		"Error"
+	)
+);
+maskCol << EvalFormula;
+
+// Add a column for Month.
+monthCol = dt1 << New Column("YearMonthOut");
+monthCol << Set Formula(
+	Char(Year(:date_out)) ||
+	"-" ||
+	If(
+	    Length(Char(Month(:date_out))) == 1,		// If Length(Month) == 1
+	    "0" || Char(Month(:date_out)),				// True: prepend a 0
+	    Char(Month(:date_out))						// False: no need to prepend
+	)
+);
+monthCol << EvalFormula;
+
+// Add a column for Operation (op_num+op_name).
+operationCol = dt1 << New Column("Operation");
+operationCol << Set Formula(
+	Char(:op_num) || " " || :op_name
+);
+operationCol << EvalFormula;
+
+
+dt2 = dt1 << Summary(
+	Group( :op_name ),
+	Sum( :wafers_out ),
+	Subgroup( :MonthOut ),
+	statistics column name format( "column" ),
+	Link to original data table( 0 )
+);
+Close(dt2, NoSave);
+
+// ------------------------------------------------------
+// Plotting
+// ------------------------------------------------------
+
+name = "Number of Wafers Through Various Steps";
+name ||= "\!Nas of " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+
+obj = dt1 << Graph Builder(
+	Size( 570, 500 ),
+	Show Control Panel( 0 ),
+	Variables( X( :YearMonthOut ), Y( :wafers_out ), Overlay( :Operation ) ),
+	Elements(
+		Bar(
+			X,
+			Y,
+			Legend( 2 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Sum" ),
+			Label( "Value" )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"MonthOut",
+			ScaleBox,
+			{Show Major Grid( 0 ), Show Major Ticks( 0 ), Show Minor Grid( 1 )}
+		),
+		Dispatch(
+			{},
+			"graph title",
+			TextEditBox,
+			{Set Text( name )}
+		),
+		Dispatch(
+			{},
+			"wafers_out",
+			ScaleBox,
+			{Min( 0 ), Inc( 10 ), Minor Ticks( 4 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		),
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Wafers Out per Month by Op_Name");
+
+// ------------------------------------------------------
+// Plotting
+// ------------------------------------------------------
+name = "Number of Wafers Through PTD";
+name ||= "\!Nas of " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Graph Builder(
+	Size( 570, 500 ),
+	Show Control Panel( 0 ),
+	Auto Stretching( 0 ),
+	Variables( X( :YearMonthOut ), Y( :wafers_out ), Overlay( :Lot Type ) ),
+	Elements(
+		Bar(
+			X,
+			Y,
+			Legend( 3 ),
+			Bar Style( "Stacked" ),
+			Summary Statistic( "Sum" ),
+			Label( "Value" )
+		)
+	),
+	Where( :op_name == "PTD_SHIP_6H" ),
+	SendToReport(
+		Dispatch(
+			{},
+			"MonthOut",
+			ScaleBox,
+			{Format( "Fixed Dec", 10, 0 ), Inc( 1 ),
+			Minor Ticks( 1 ), Show Major Grid( 0 ), Show Major Ticks( 0 ),
+			Show Minor Grid( 1 )}
+		),
+		Dispatch(
+			{},
+			"wafers_out",
+			ScaleBox,
+			{Min( 0 ), Inc( 10 ), Minor Ticks( 4 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		),
+		Dispatch( {}, "graph title", TextEditBox, {Set Text( name )} )
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "PTD Wafers Out Each Month");
+
+
+//Close(dt1, NoSave);

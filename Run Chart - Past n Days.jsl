@@ -1,0 +1,382 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Probe Cycle Time Reporting.jsl
+
+Created by DThor on 2014-10-20
+
+Purpose:
+This script is used for reporting On-Wafer cycle times and
+related statistics. It connects to the WIPTrac database
+to pull all the required data.
+
+Currently Reports:
+	Start to Ink cycle time for the last N days
+	Start to PTD cycle time for xthe last N days
+	Pareto of location of lots at probe
+	Pareto of location of wafers at probe
+	LotType vs Cycle Time, with Mask as Color
+	Amount of additional time needed for PTD (PTD - Inking)
+		by mask
+		by lot type
+	Run Chart of PTD Cycle Time by probe start, labeled by lot ID.
+
+Things to add:
+	TimeToInk vs TimeToPTD
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+days = 30;
+
+
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Cycle Time - Inking and PTD
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// Database connection string
+conn = "DSN=PostgreSQL30;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// If using 64-bit JMP
+conn = "DSN=PostgreSQL30_x64;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// 1329 = TRANSFER TO PROBE_6H (970000)
+// 1336 = TEST_INKING_6H-M3T (977000)
+// 1339 = PTD_SHIP_6H (980000)
+query = "
+WITH
+    t1 AS (
+        SELECT
+			device_id,
+			op_id,
+			date_out,
+			starts
+        FROM public.history
+        WHERE op_id = 1336 AND date_out > '{}'
+        ),
+    t2 AS (
+        SELECT
+			a.device_id,
+			a.op_id,
+			a.date_in,
+			a.starts,
+			b.lot_num,
+			c.partnum,
+			c.partrev,
+			d.lottype
+        FROM public.history AS a
+        INNER JOIN public.device AS b ON
+        a.device_id = b.device_id
+        INNER JOIN public.part AS c ON
+        b.part_id = c.part_id
+        INNER JOIN public.lottype as d ON
+        d.lottype_id = b.lottype_id
+        WHERE a.op_id = 1329),
+    t3 AS (
+    	SELECT
+			device_id,
+			op_id,
+			date_out,
+			starts
+        FROM public.history
+        WHERE op_id = 1339 AND date_out > '{}' 
+    )
+SELECT
+	t1.device_id,
+	t2.lot_num,
+	t2.partnum,
+	t2.partrev,
+	t2.lottype,
+	t2.op_id,
+	t2.date_in AS probe_start_time,
+	t2.starts AS wafers_in,
+	t1.date_out AS inking_end_time,
+	t1.starts AS wafers_out_ink,
+	t3.date_out AS ptd_end_time,
+	t3.starts AS wafers_out_ptd
+FROM t1
+INNER JOIN t2 ON
+t1.device_id = t2.device_id
+INNER JOIN t3 ON
+t1.device_id = t3.device_id
+ORDER BY t2.date_in
+";
+
+// Insert the start date
+Substitute Into(query, "{}", Format(Today() - days*24*3600, "yyyy-mm-dd"));
+
+//Show(query);
+
+// Execute the query
+dt1 = Open Database(conn, query, "Cycle Time");
+
+// Delete the Save to DB script so that we don't accidentally
+// overwrite things (though I'm pretty sure the ODBC
+// connection parameter is read-only anyway)
+dt1 << Delete Table Property("Save To DB");
+
+
+// ------------------------------------------------------
+// Add Columns
+// ------------------------------------------------------
+
+// Add a columnn for the Mask, taken from partnum
+maskCol = dt1 << New Column("Mask", Character);
+maskCol << Set Formula( Substr(:partnum, 5, 5) );
+maskCol << EvalFormula;
+
+// Add a columnn for the Short LotType, taken from lottype
+typeCol = dt1 << New Column("Lot Type", Character);
+typeCol << Set Formula(
+	Match(
+		:lottype,
+		"QUAL", "Qual",
+		"ENGINEERING", "ENGR",
+		"PRODUCTION", "PROD",
+		"DOWNGRADE", "DOWN",
+		"EQUIPMENT", "EQUIP",
+		"MONITOR", "MON",
+		"Error"
+	)
+);
+maskCol << EvalFormula;
+
+// Add a column for cycle time in Seconds
+cycleTimeCol = dt1 << New Column("Inking Cycle Time (sec)");
+cycleTimeCol << Set Formula(
+	(:inking_end_time - :probe_start_time)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Days
+cycleTimeCol = dt1 << New Column("Inking Cycle Time (day)");
+cycleTimeCol << Set Formula(
+	:Name( "Inking Cycle Time (sec)" ) / (24*60*60)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Seconds
+cycleTimeCol = dt1 << New Column("PTD Cycle Time (sec)");
+cycleTimeCol << Set Formula(
+	(:ptd_end_time - :probe_start_time)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Days
+cycleTimeCol = dt1 << New Column("PTD Cycle Time (day)");
+cycleTimeCol << Set Formula(
+	:Name( "PTD Cycle Time (sec)" ) / (24*60*60)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Days
+diffCol = dt1 << New Column("Additional Time for PTD");
+diffCol << Set Formula(
+	:Name( "PTD Cycle Time (day)" ) - :Name( "Inking Cycle Time (day)" )
+);
+diffCol << EvalFormula;
+
+
+
+// ------------------------------------------------------
+// Plotting
+// ------------------------------------------------------
+
+
+// Run Chart of PTD Cycle Times. Ordered by ProbeStart, labeled by Lot
+// Note that this uses dt2. This is so that the Control Chart Legend does not
+// overwrite the row states (color, marker) of the other plots from dt1.
+avg_val = Col Mean(:Name( "PTD Cycle Time (day)"), .5);
+avg_str = Substitute("Avg={}", "{}", Char(avg_val, 5, 2));
+/*
+name = Substitute("Zonal Run Chart of PTD Cycle Time, past {} days", "{}", Char(days));
+name ||= "\!Nas of " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt1 << Control Chart(
+	Sample Label( :lot_num ),
+	Group Size( 1 ),
+	KSigma( 3 ),
+	Chart Col(
+		:Name( "PTD Cycle Time (day)" ),
+		Individual Measurement(
+			Show Center Line( 0 ),
+			Show Control Limits( 0 ),
+			Shade Zones( 1 )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{"Individual Measurement of PTD Cycle Time (day)"},
+			"2",
+			ScaleBox,
+			{
+				Min( 0 ),
+				Inc( 2 ),
+				Minor Ticks( 1 ), 
+				Add Ref Line( avg_val, Solid, "Dark Green", avg_str, 2 ),
+				Show Major Grid( 1 ),
+				Show Minor Grid( 1 )
+			}
+		),
+		Dispatch(
+			{"Individual Measurement of PTD Cycle Time (day)"},
+			"1",
+			ScaleBox,
+			{
+				Inc( 1 ),
+				Minor Ticks( 0 ),
+				Show Major Grid( 1 ),
+				Show Minor Grid( 1 )
+			}
+		),
+		Dispatch(
+			{"Individual Measurement of PTD Cycle Time (day)"},
+			"IR Chart of IM",
+			FrameBox,
+			{Frame Size( 575, 250 ),
+			Grid Line Order( 6 ),
+			Reference Line Order( 7 ),
+			Row Legend(
+				Mask,
+				Color( 0 ),
+				Color Theme( "" ),
+				Marker( 1 ),
+				Marker Theme( "Solid" ),
+				Continuous Scale( 0 ),
+				Reverse Scale( 0 ),
+				Excluded Rows( 0 )
+			), Row Legend(
+				Lot Type,
+				Color( 1 ),
+				Color Theme( "JMP Default" ),
+				Marker( 0 ),
+				Marker Theme( "" ),
+				Continuous Scale( 0 ),
+				Reverse Scale( 0 ),
+				Excluded Rows( 0 )
+			)
+			}
+		),
+		Dispatch(
+			{},
+			"Individual Measurement of PTD Cycle Time (day)",
+			OutlineBox,
+			{Set Title( name )}
+		)
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Control Chart", "Run Chart");
+*/
+
+
+// IR Chart
+name = Substitute("Run Chart of PTD Cycle Time, past {} days", "{}", Char(days));
+name ||= "\!Nas of " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+num_rows = 0;
+span = Round(num_rows / 10, 0);
+obj = dt1 << Control Chart(
+	Sample Label( :lot_num ),
+	Group Size( 1 ),
+	KSigma( 3 ),
+	Range Span( 3 ),
+	Chart Col(
+		:Name( "PTD Cycle Time (day)" ),
+		Individual Measurement(
+			Show Center Line( 0 ),
+			Show Control Limits( 0 ),
+			Shade Zones( 0 )
+		),
+		Moving Range(
+			Show Center Line( 0 ),
+			Show Control Limits( 0 ),
+			Shade Zones( 0 )
+			)
+	),
+	SendToReport(
+		Dispatch(
+			{"Individual Measurement of PTD Cycle Time (day)"},
+			"2",
+			ScaleBox,
+			{
+				Min( 0 ),
+				Inc( 2 ),
+				Minor Ticks( 1 ),
+				Add Ref Line( avg_val, Solid, "Black", avg_str, 2 ),
+				Show Major Grid( 1 ),
+				Show Minor Grid( 1 )
+			}
+		),
+		Dispatch(
+			{"Individual Measurement of PTD Cycle Time (day)"},
+			"1",
+			ScaleBox,
+			{
+				Inc( 1 ),
+				Minor Ticks( 0 ),
+				Show Major Grid( 1 ),
+				Show Minor Grid( 1 )
+			}
+		),
+		Dispatch(
+			{"Individual Measurement of PTD Cycle Time (day)"},
+			"IR Chart of IM",
+			FrameBox,
+			{Frame Size( 575, 250 ),
+			Grid Line Order( 6 ),
+			Reference Line Order( 7 ),
+			Row Legend(
+				Mask,
+				Color( 0 ),
+				Color Theme( "" ),
+				Marker( 1 ),
+				Marker Theme( "Solid" ),
+				Continuous Scale( 0 ),
+				Reverse Scale( 0 ),
+				Excluded Rows( 0 )
+			), Row Legend(
+				Lot Type,
+				Color( 1 ),
+				Color Theme( "JMP Default" ),
+				Marker( 0 ),
+				Marker Theme( "" ),
+				Continuous Scale( 0 ),
+				Reverse Scale( 0 ),
+				Excluded Rows( 0 )
+			)
+			}
+		),
+		Dispatch(
+			{"Moving Range of PTD Cycle Time (day)"},
+			"2",
+			ScaleBox,
+			{
+				Min( 0 ),
+				Inc( 2 ),
+				Minor Ticks( 1 ),
+				Show Major Grid( 1 ),
+				Show Minor Grid( 1 )
+			}
+		),
+		Dispatch(
+			{},
+			"Individual Measurement of PTD Cycle Time (day)",
+			OutlineBox,
+			{Set Title( name )}
+		)
+	)
+);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Control Chart", "Run Chart");
+
+//Close(dt1, NoSave);

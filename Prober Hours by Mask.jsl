@@ -1,0 +1,249 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Prober Hours by Mask.jsl
+
+Created by DThor on 2014-10-20
+
+Purpose:
+This script is used for reporting On-Wafer cycle times and
+related statistics. It connects to the WIPTrac database
+to pull all the required data.
+
+Currently Reports:
+	Start to Ink cycle time for the last N days
+	Start to PTD cycle time for xthe last N days
+	Pareto of location of lots at probe
+	Pareto of location of wafers at probe
+	LotType vs Cycle Time, with Mask as Color
+	Amount of additional time needed for PTD (PTD - Inking)
+		by mask
+		by lot type
+	Run Chart of PTD Cycle Time by probe start, labeled by lot ID.
+
+Things to add:
+	TimeToInk vs TimeToPTD
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+start_date = "2014-11-01";
+
+// ------------------------------------------------------
+// Functions
+// ------------------------------------------------------
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Cycle Time - Inking and PTD
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// Database connection string
+conn = "DSN=OWT;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+// If using 64-bit JMP
+conn = "DSN=OWT_x64;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+// ------------------------------------------------------
+// Test Time Statistics
+//
+// Returns how long each test took for a given mask.
+//
+// Useful for calculating expected cycle time.
+// 
+// ------------------------------------------------------
+
+// First, create a List of all the items we're going to query
+// {mask, device, process step, testnum, test type, additional_info, num_die}
+queryItems = {
+	// 07G11
+	{"07G11", "A", "m3", "1", "dc", "", "1573"},				// Rdson
+	{"07G11", "A", "m3", "1", "breakdown", "150C", "1573"},		// High Temp HVOS
+	{"07G11", "A", "m3", "20", "breakdown", "Pulsed", "1573"},	// VertBD
+	{"07G11", "A", "m3", "50", "breakdown", "with TC", "1573"},	// RT HVOS+TC
+	// 07G12
+	{"07G12", "A", "m3", "1", "dc", "", "1719"},				// Rdson
+	{"07G12", "A", "m3", "1", "breakdown", "150C", "1719"},		// High Temp HVOS
+	{"07G12", "A", "m3", "20", "breakdown", "Pulsed", "1719"},	// VertBD
+	{"07G12", "A", "m3", "50", "breakdown", "with TC", "1719"},	// RT HVOS+TC
+	// 07G13
+	{"07G13", "A", "m3", "1", "dc", "", "448"},					// Rdson
+	{"07G13", "A", "m3", "1", "breakdown", "150C", "448"},		// High Temp HVOS
+	{"07G13", "A", "m3", "20", "breakdown", "Pulsed", "448"},	// VertBD
+	{"07G13", "A", "m3", "50", "breakdown", "with TC", "448"},	// RT HVOS+TC
+	// 07G14
+	{"07G14", "A", "m3", "1", "dc", "", "2914"},				// Rdson
+	{"07G14", "A", "m3", "1", "breakdown", "150C", "2914"},		// High Temp HVOS
+	{"07G14", "A", "m3", "20", "breakdown", "Pulsed", "2914"},	// VertBD
+	{"07G14", "A", "m3", "50", "breakdown", "with TC", "2914"},	// RT HVOS+TC
+	// MDH27
+	{"MDH27", "PCM", "m3", "1", "pcm", "", "14"},				// PCM
+	{"MDH27", "1", "m3", "1", "switching", "", "14"},			// Switching
+	{"MDH27", "A", "m3", "1", "dc", "", "470"},					// Rdson
+	{"MDH27", "A", "m3", "1", "breakdown", "150C", "470"},		// High Temp HVOS
+	{"MDH27", "A", "m3", "20", "breakdown", "Pulsed", "470"},	// VertBD
+	{"MDH27", "A", "m3", "50", "breakdown", "with TC", "470"}	// RT HVOS+TC
+};
+
+// Then, create a default query, which we'll add our query items to.
+defaultQuery = "
+SELECT
+	mask,
+	test_type,
+	test_num,
+	test0,
+	additional_info,
+	num_die,
+	id_dbid,
+	test_time
+FROM owt.log
+WHERE start > '2014-10-01'
+	AND defaults = 1
+	AND aborted = 0
+	AND mask = '{mask}'
+	AND device = '{device}'
+	AND process_step = '{process}'
+	AND test_num = {testnum}
+	AND test_type = '{testtype}'
+	AND additional_info = '{additional_info}'
+	AND num_die = {num_die}
+";
+
+// Create an empty list to store all our query strings
+queryList = {};
+
+// Iterate through our query list, replacing keyword arguements
+For( i = 1, i <= Length(queryItems), i++,
+	Insert Into(queryList,
+		Substitute( defaultQuery,
+			"{mask}", queryItems[i][1],
+			"{device}", queryItems[i][2],
+			"{process}", queryItems[i][3],
+			"{testnum}", queryItems[i][4],
+			"{testtype}", queryItems[i][5],
+			"{additional_info}", queryItems[i][6],
+			"{num_die}", queryItems[i][7]
+		)
+	)
+);
+
+//Show(queryList);
+
+// Create a single query string by inserting " UNION ALL " between each query
+query = Concat Items( queryList, "
+UNION ALL
+");
+
+//Show(query);
+
+dt1 = Open Database(conn, query, "TestTime");
+dt1 << Delete Table Property("Save To DB");
+
+hrCol = dt1 << New Column( "TestTime_hr" );
+hrCol << Set Formula(
+	:test_time / 3600
+);
+hrCol << EvalFormula;
+
+// Get rid of some invlaid tests
+dt1 << Select Where( :test0 == "Vertical Breakdown" );
+For Each Row(
+	If( Selected( Row State() ) == 1,
+		Hidden( Row State() ) = 1;
+		Excluded( Row State() ) = 1;
+	)
+);
+dt1 << Clear Select;
+
+// Create a Summary Table which displays the 10th, 50th, and 90th Percentiles
+// This will be used to generate Fast, Standard, and Planning probe times.
+dt2 = Data Table( "TestTime" ) << Summary(
+	Group( :mask, :test0, :test_num, :test_type ),
+	Quantiles( 10, :TestTime_hr ),
+	Median( :TestTime_hr ),
+	Quantiles( 90, :TestTime_hr ),
+	Link to original data table( 1 ),
+	output table name( "TestTime Quantiles" )
+);
+
+dt3 = dt2 << Summary(
+	Group( :mask ),
+	Sum( :Name( "Quantiles10(TestTime_hr)" ) ),
+	Sum( :Name( "Median(TestTime_hr)" ) ),
+	Sum( :Name( "Quantiles90(TestTime_hr)" ) ),
+	Link to original data table( 1 ),
+	output table name( "Total Test Time by Mask" )
+);
+
+// Rename some columns and set the display properties
+Column(dt3, "Sum(Quantiles10(TestTime_hr))") << Set Name("Fast");
+Column(dt3, "Sum(Median(TestTime_hr))") << Set Name("Standard");
+Column(dt3, "Sum(Quantiles90(TestTime_hr))") << Set Name("Planning");
+
+Column(dt3, "Fast") << Format("Best", 5);
+Column(dt3, "Standard") << Format("Best", 5);
+Column(dt3, "Planning") << Format("Best", 5);
+
+// ------------------------------------------------------
+// Plotting
+// ------------------------------------------------------
+// Total Probe Time by Mask
+name = "Total Probe Time by Mask";
+name ||= "\!N" || start_date || " to " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+obj = dt3 << Graph Builder(
+	Size( 650, 300 ),
+	Show Control Panel( 0 ),
+	Variables(
+		X( :mask ),
+		Y( :Fast ),
+		Y( :Standard, Position( 1 ) ),
+		Y( :Planning, Position( 1 ) )
+	),
+	Elements(
+		Bar(
+			X,
+			Y( 1 ),
+			Y( 2 ),
+			Y( 3 ),
+			Legend( 2 ),
+			Bar Style( "Side by side" ),
+			Summary Statistic( "Mean" ),
+			Label( "Value" )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"Fast",
+			ScaleBox,
+			{Min( 0 ), Max( 15 ), Inc( 2 ), Minor Ticks( 3 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		),
+		Dispatch(
+			{},
+			"graph title",
+			TextEditBox,
+			{Set Text( "Wafer Probe Time by Mask" )}
+		),
+		Dispatch( {}, "X title", TextEditBox, {Set Text( "Mask" )} ),
+		Dispatch( {}, "Y title", TextEditBox, {Set Text( "Time (hr)" )} ),
+		Dispatch(
+			{},
+			"graph title",
+			TextEditBox,
+			{Set Text( name )}
+		)
+	)
+);
+
+obj << Save Script to DataTable;
+dt3 << Rename Table Property("Graph Builder", "Probe Time by Mask");

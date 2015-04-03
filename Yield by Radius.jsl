@@ -1,0 +1,137 @@
+// Attempts to fill in a data table of Yield by Radius
+//
+// Datatable needs to have the following two columns:
+// "Result" and "Radius". The script
+// create or update LSL, USL, Pass, TotalDieWithinRadius,
+// TotalDiePassWithinRadius, and YieldWithinRadius columns
+
+dt1 = Current Data Table();
+
+// Edit these to update the specs.
+lslValue = 9;
+uslValue = 12.7;
+
+
+// First, lets check if the columns already exist
+colNameList = dt1 << Get Column Names(string);
+
+newCols = {"LSL", "USL", "Pass", "TotalDieWithinRadius",
+          "TotalDiePassWithinRadius", "YieldWithinRadius"};
+
+/*
+If (!contains(colNameList, newCol),
+	// Create it
+	dt1 << New Column(newCol, numeric, continuous);
+);
+*/
+
+For ( i = 1, i <= Length(newCols), i++,
+	If (!contains(colNameList, newCols[i]),
+		// Create it
+		dt1 << New Column(newCols[i], numeric, continuous);
+	);
+);
+
+// Now all of the columns should exist, so we can add 'formulas' for
+// the upper and lower spec limits.
+// TODO: Change to just setting entire column?
+lslCol = Column( "LSL" );
+lslCol << Set Formula(lslValue);
+lslCol << Eval Formula;
+
+uslCol = Column( "USL" );
+uslCol << Set Formula(uslValue);
+uslCol << Eval Formula;
+
+// Now update the Pass column
+passCol = Column( "Pass" );
+passCol << Set Formula(:LSL <= :Rdson <= :USL);
+passCol << Eval Formula;
+
+// Next, we need to determine how many die are within a given radius.
+// At this point, the script gets a bit specialized - The user needs
+// to determine what Columns make up the primary key.
+//
+// Example: My Reedholm Rdson MSA data
+// The Lot_ID, Test_Name, and Wafer_Name columns make up a PK for a
+// single wafer.
+//
+// TODO: Change to user prompt to select PK columns.
+//
+// For now, I only expect to work on the MSA data so I know the cols.
+//
+// Take a summary of the data, grouped by PKs and Radius. We also
+// find the sum of passing die for each unique radius. This will
+// be used later.
+// Note that the order is intentional.
+dt2 = dt1 << Summary(
+	Group( :Test_Name, :Lot_ID, :Wafer_Name, :Radius ),
+	Sum( :Pass )
+);
+
+// Next, create a column which Accumulates how many die are within
+// each radius.
+// Formula is so that the TotalDieWithinRadius resets on each wafer,
+// lot, or test change
+totalDieWithinRadiusCol = dt2 << New Column( "TotalDieWithinRadius" );
+totalDieWithinRadiusCol << Set Formula(
+	If(
+		// If: first Row in Table
+		Row() == 1,
+		// Then reset accumulate
+		:N Rows[Row(),Empty()],
+		
+		// Else If: wafer, Lot, or Test Changed
+		:Test_Name[Row()] != :Test_Name[Row() - 1]
+		| :Lot_ID[Row()] != :Lot_ID[Row() - 1]
+		| :Wafer_Name[Row()] != :Wafer_Name[Row() - 1],
+		// Then reset accumulate
+		:N Rows[Row()],
+		
+		// Else: accumulate
+		:N Rows[Row()] + :TotalDieWithinRadius[Row() - 1])
+);
+totalDieWithinRadiusCol << Eval Formula;
+
+// Now create the TotalDiePassWithinRadius column. Pretty much the
+// same as the other column, but uses Sum(Pass) instead.
+totalDiePassWithinRadiusCol = dt2 << New Column( "TotalDiePassWithinRadius" );
+totalDiePassWithinRadiusCol << Set Formula(
+	If(
+		// If: first Row in Table
+		Row() == 1,
+		// Then reset accumulate
+		:Name("Sum(Pass)")[Row(),Empty()],
+		
+		// Else If: wafer, Lot, or Test Changed
+		:Test_Name[Row()] != :Test_Name[Row() - 1]
+		| :Lot_ID[Row()] != :Lot_ID[Row() - 1]
+		| :Wafer_Name[Row()] != :Wafer_Name[Row() - 1],
+		// Then reset accumulate
+		::Name("Sum(Pass)")[Row()],
+		
+		// Else: accumulate
+		::Name("Sum(Pass)")[Row()] + :TotalDiePassWithinRadius[Row() - 1])
+);
+totalDiePassWithinRadiusCol << Eval Formula;
+
+// Lastly, create the YieldWithinRadius column.
+yieldWithinRadiusCol = dt2 << New Column( "YieldWithinRadius" );
+yieldWithinRadiusCol << Set Formula(
+	(:TotalDiePassWithinRadius / :TotalDieWithinRadius) * 100
+);
+yieldWithinRadiusCol << Eval Formula;
+
+// Now that our Summary table is done, let's update the main table
+// with the results.
+dt2Name = dt2 << Get Name();
+dt1 << Update(
+	With( dt2 ),
+	Match Columns(
+		:Lot_ID = :Lot_ID,
+		:Wafer_Name = :Wafer_Name,
+		:Test_Name = :Test_Name,
+		:Radius = :Radius
+	),
+	Add Columns from Update table( None )
+)

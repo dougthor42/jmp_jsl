@@ -1,0 +1,407 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Probe Cycle Time Reporting.jsl
+
+Created by DThor on 2014-10-20
+
+Purpose:
+This script is used for reporting On-Wafer cycle times and
+related statistics. It connects to the WIPTrac database
+to pull all the required data.
+
+Currently Reports:
+	Start to Ink cycle time for the last N days
+	Start to PTD cycle time for xthe last N days
+	Pareto of location of lots at probe
+	Pareto of location of wafers at probe
+	LotType vs Cycle Time, with Mask as Color
+	Amount of additional time needed for PTD (PTD - Inking)
+		by mask
+		by lot type
+	Run Chart of PTD Cycle Time by probe start, labeled by lot ID.
+
+Things to add:
+	TimeToInk vs TimeToPTD
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+
+// ------------------------------------------------------
+// Variables
+// ------------------------------------------------------
+
+days = 30;
+
+
+// ------------------------------------------------------
+// Functions
+// ------------------------------------------------------
+
+// Inking Cycle Time by Mask, box plots
+MyPlot = Function(
+	/*
+	Plots up a 3-set of data for a given data table.
+		MyPlot(datatable, x_var_col, y_var_col, color_col)
+		
+		datatable: A data table object that the data will be pulled from
+		x_var_col: A column of Nominal data. Generally character.
+		y_var_col: A column of Continuous numeric data.
+		color_col: A column of Nominal data. Generally character.
+
+	Example usage:
+		// Note that each argument is wrapped in Expr().
+		obj = MyPlot(
+			Expr(dt1),
+			Expr(:Mask),
+			Expr(:Name( "PTD Cycle Time (day)")),
+			Expr(:lottype)
+		);
+	
+	For the most part, this function works. The only thing that isn't
+	working right now is adding the median value line to the y axis.
+	The 'display element' argument needs to be a string that matches
+	the name of the column, but I get an error when trying to get
+	the column name:
+	
+		missing argument in access or evaluation of 'Column Name' , Column Name( y_var_col )
+	
+	I've fixed the error, but it still doesn't work. I originally had Column Name(y_var_col),
+	but that is incorrect. The correct way is y_var_col << Get Name;
+	
+	*/
+	
+	// Function inputs
+	{datatable, x_var_col, y_var_col, color_col, name},
+	// local variables
+	{unique_heights, n, legend_list = {}, obj},
+
+	// Get the Y Column Name for later use when adding median line to graphs.
+	y_col_name = y_var_col << Get Name;
+	//Print(y_col_name);
+	
+	// Get the number of unique elements in the color_col column by
+	// putting the color_col column as keys in an associative array.
+	// Associative arrays must have unique keys, so this drops all duplicates.
+	unique_items = associative array(color_col << get values);
+	n = nitems(unique_items);
+	Write( "\!NCol:", color_col, "  Unique Items:", unique_items, "  Count:", n );
+	
+	// This is used so that I can remove the box plot from the legend:
+		// Dispatch( {}, "400", LegendBox, {Position( {-1, 0, 1, ..., n - 1} )} )
+	// Note that I have to go to Len(unique_items) - 1:
+		// There are n items in the list.
+		// There are n + 1 items in the legend.
+		// The legend is 0-indexed:  Normal = {0, 1, 2, ..., n} (total n+1 elements)
+		// So what we want is:  New = {-1, 0, 1, 2, ..., n - 1} (total n+1 elements)
+	// And that's why the sky is blue.
+	legend_list = {};
+	For (i = 0, i <= n, i++,
+		Insert Into (legend_list, i - 1);
+	);
+	
+	name ||= "\!NParsed: " || Format(Today(),"yyyy-mm-dd" ) || " " || Format(Today(), "h:m");
+	//Show(name);
+	//Show(legend_list);
+	
+	median = Col Quantile(y_var_col, .5);
+	Show(median);
+	
+	
+	// We can't use variables in Graph Builder very easily (specifically in the Dispatch
+	// part), so we store the code as an expression and then use Substitute() before eval.
+	// See https://communities.sas.com/message/117725
+	
+	
+	// Actually create the graph
+	plot = Expr(
+		obj = datatable << Graph Builder(
+			Size( 350, 280 ),
+			Show Control Panel( 0 ),
+			Show Legend( 1 ),
+			Variables(
+				X( x_var_col ),
+				Y( y_var_col ),
+				Color( color_col )
+			),
+			Elements(
+				Box Plot(
+					X,
+					Y,
+					Legend( 6 ),
+					Jitter( 1 ),
+					Outliers( 0 ),
+					Box Style( "Outlier" )
+				),
+				Points( X, Y, Legend( 8 ), Jitter( 1 ) ),
+				Caption Box(
+					X,
+					Y,
+					Legend( 9 ),
+					Summary Statistic( "N" ),
+					X Position( "Right" ),
+					Y Position( "Top" )
+				),
+				Caption Box(
+					X,
+					Y,
+					Legend( 9 ),
+					Summary Statistic( "Median" ),
+					X Position( "Left" ),
+					Y Position( "Top" )
+				)
+			),
+			SendToReport(
+				Dispatch(
+					{},
+					sub1,		// Only works because of Substitute Expression. See above
+					ScaleBox,
+					{Add Ref Line(
+						Col Quantile(y_var_col, .5),
+						Dashed,
+						{0, 0, 0},
+						"",
+						1
+					),
+					Show Major Grid( 1 ),
+					Show Minor Grid( 1 )
+					}
+				),
+				Dispatch( {}, "400", LegendBox, {Position( sub2 )} ),
+				Dispatch(
+					{},
+					"graph title",
+					TextEditBox,
+					{Set Text( name )}
+				),
+				Dispatch( {}, "Graph Builder", FrameBox, {Marker Size( 4 )} )
+			)
+		)
+	);				// End Expression for GraphBuilder
+
+	Eval(
+		Substitute(
+			Name Expr( plot ),
+			Expr(sub1), y_col_name,
+			Expr(sub2), legend_list
+		)
+	);
+);
+
+
+
+// ------------------------------------------------------
+// ------------------------------------------------------
+// Cycle Time - Inking and PTD
+// ------------------------------------------------------
+// ------------------------------------------------------
+
+// Database connection string
+conn = "DSN=PostgreSQL30;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// If using 64-bit JMP
+conn = "DSN=PostgreSQL30_x64;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+// 1329 = TRANSFER TO PROBE_6H (970000)
+// 1336 = TEST_INKING_6H-M3T (977000)
+// 1339 = PTD_SHIP_6H (980000)
+query = "
+WITH
+    t1 AS (
+        SELECT
+			device_id,
+			op_id,
+			date_out,
+			starts
+        FROM public.history
+        WHERE op_id = 1336 AND date_out > '{}'
+        ),
+    t2 AS (
+        SELECT
+			a.device_id,
+			a.op_id,
+			a.date_in,
+			a.starts,
+			b.lot_num,
+			c.partnum,
+			c.partrev,
+			d.lottype
+        FROM public.history AS a
+        INNER JOIN public.device AS b ON
+        a.device_id = b.device_id
+        INNER JOIN public.part AS c ON
+        b.part_id = c.part_id
+        INNER JOIN public.lottype as d ON
+        d.lottype_id = b.lottype_id
+        WHERE a.op_id = 1329),
+    t3 AS (
+    	SELECT
+			device_id,
+			op_id,
+			date_out,
+			starts
+        FROM public.history
+        WHERE op_id = 1339 AND date_out > '{}' 
+    )
+SELECT
+	t1.device_id,
+	t2.lot_num,
+	t2.partnum,
+	t2.partrev,
+	t2.lottype,
+	t2.op_id,
+	t2.date_in AS probe_start_time,
+	t2.starts AS wafers_in,
+	t1.date_out AS inking_end_time,
+	t1.starts AS wafers_out_ink,
+	t3.date_out AS ptd_end_time,
+	t3.starts AS wafers_out_ptd
+FROM t1
+INNER JOIN t2 ON
+t1.device_id = t2.device_id
+INNER JOIN t3 ON
+t1.device_id = t3.device_id
+ORDER BY t2.date_in
+";
+
+// Insert the start date
+Substitute Into(query, "{}", Format(Today() - days*24*3600, "yyyy-mm-dd"));
+
+//Show(query);
+
+// Execute the query
+dt1 = Open Database(conn, query, "Cycle Time");
+
+// Delete the Save to DB script so that we don't accidentally
+// overwrite things (though I'm pretty sure the ODBC
+// connection parameter is read-only anyway)
+dt1 << Delete Table Property("Save To DB");
+
+
+// ------------------------------------------------------
+// Add Columns
+// ------------------------------------------------------
+
+// Add a columnn for the Mask, taken from partnum
+maskCol = dt1 << New Column("Mask", Character);
+maskCol << Set Formula( Substr(:partnum, 5, 5) );
+maskCol << EvalFormula;
+
+// Add a columnn for the Short LotType, taken from lottype
+typeCol = dt1 << New Column("Lot Type", Character);
+typeCol << Set Formula(
+	Match(
+		:lottype,
+		"QUAL", "Qual",
+		"ENGINEERING", "ENGR",
+		"PRODUCTION", "PROD",
+		"DOWNGRADE", "DOWN",
+		"EQUIPMENT", "EQUIP",
+		"MONITOR", "MON",
+		"Error"
+	)
+);
+maskCol << EvalFormula;
+
+
+// Add a column for cycle time in Seconds
+cycleTimeCol = dt1 << New Column("Inking Cycle Time (sec)");
+cycleTimeCol << Set Formula(
+	(:inking_end_time - :probe_start_time)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Days
+cycleTimeCol = dt1 << New Column("Inking Cycle Time (day)");
+cycleTimeCol << Set Formula(
+	:Name( "Inking Cycle Time (sec)" ) / (24*60*60)
+);
+cycleTimeCol << EvalFormula;
+
+
+// Add a column for cycle time in Seconds
+cycleTimeCol = dt1 << New Column("PTD Cycle Time (sec)");
+cycleTimeCol << Set Formula(
+	(:ptd_end_time - :probe_start_time)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Days
+cycleTimeCol = dt1 << New Column("PTD Cycle Time (day)");
+cycleTimeCol << Set Formula(
+	:Name( "PTD Cycle Time (sec)" ) / (24*60*60)
+);
+cycleTimeCol << EvalFormula;
+
+// Add a column for cycle time in Days
+diffCol = dt1 << New Column("Additional Time for PTD");
+diffCol << Set Formula(
+	:Name( "PTD Cycle Time (day)" ) - :Name( "Inking Cycle Time (day)" )
+);
+diffCol << EvalFormula;
+
+// Add a column for Month that PTD was done in.
+diffCol = dt1 << New Column("PTD Shipping Month");
+diffCol << Set Formula(
+	Month(:ptd_end_time)
+);
+diffCol << EvalFormula;
+
+
+// ------------------------------------------------------
+// Plotting
+// ------------------------------------------------------
+
+// PTD Cycle Time by Mask
+obj = MyPlot(
+	Expr(dt1),								// datatable
+	Expr(:Mask),							// x value column
+	Expr(:Name( "PTD Cycle Time (day)" )), 	// y value column
+	Expr(:Lot Type),						// Color By column
+	Substitute("PTD CT by Mask, Last {} days", "{}", Char(days))
+	);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "PTD CT by Mask");
+
+// PTD Cycle Time by Lot Type
+obj = MyPlot(
+	Expr(dt1),
+	Expr(:Lot Type),
+	Expr(:Name( "PTD Cycle Time (day)" )),
+	Expr(:Mask),
+	Substitute("PTD CT by Lot Type, Last {} days", "{}", Char(days))
+	);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "PTD CT by Lot Type");
+
+
+/*
+// Time Needed for PTD by Lot Type
+obj = MyPlot(
+	Expr(dt1),
+	Expr(:Lot Type),
+	Expr(:Name("Additional Time for PTD")),
+	Expr(:Mask),
+	"Time Needed for PTD by LotType"
+	);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Time Needed for PTD by LotType");
+
+// Time Needed for PTD by Mask
+obj = MyPlot(
+	Expr(dt1),
+	Expr(:Mask),
+	Expr(:Name("Additional Time for PTD")),
+	Expr(:Lot Type),
+	"Time Needed for PTD by Mask"
+	);
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Time Needed for PTD by Mask");
+*/
+
+
+//Close(dt1, NoSave);

@@ -1,0 +1,120 @@
+//
+
+//   Change first line to //! if you want it to run on double-click rather than edit
+/*//////////////////////////////////////////////////////////
+Aizu Yield Run Chart.jsl
+
+Created by DThor on 2015-01-07
+
+Purpose:
+Generates a run chart of Aizu wafer probe yield.
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+// Change this to set a new start date
+// Format is the same as a wafer growth: YYMMDD
+start_date = "140301";
+
+// Database connection string
+conn = "DSN=PowerSQL;UID=guang;PWD={wu1204};SERVER={115-db};DATABASE=test;PORT=3306;";
+
+// If using 64-bit JMP
+conn = "DSN=PowerSQL_x64;UID=guang;PWD={wu1204};SERVER={115-db};DATABASE=test;PORT=3306;";
+
+
+// Generate our query
+query = "
+SELECT
+	Lot AS DBTool_Lot,
+	Wafer,
+	AWTDYield,
+	AWTDGoodDie,
+	Completedate,
+	SUBSTRING(Wafer,1,6) as growth_date
+FROM
+	tbl_test
+WHERE
+	CAST(SUBSTRING(Wafer,1,6) AS DECIMAL) > {}
+	AND AWTDYield >= 0
+	AND Wafer Not Like 'Val%'
+	AND Wafer LIKE '%C-%'
+	AND (Lot LIKE '07G11%'
+		OR Lot LIKE '07G13%'
+		OR Lot LIKE '07G14%')
+";
+
+Substitute Into(query, "{}", start_date);
+//Show(query);
+
+// Execute the Query into a data table
+dt1 = Open Database(conn, query, "AizuYield");
+dt1 << Delete Table Property("Save To DB");
+
+// Add a column for Mask, pulling the data from the DBTool lot name
+maskCol = dt1 << New Column( "Mask");
+maskCol << Set Formula(
+	Word(1, :DBTool_Lot, "-")
+);
+maskCol << EvalFormula;
+
+// Add a column for Lot, pulling the data from the DBTool lot name
+lotCol = dt1 << New Column( "Lot");
+lotCol << Set Formula(
+	Substr(:DBTool_Lot, Length(:Mask) + 2)
+);
+lotCol << EvalFormula;
+lotCol << Modeling Type( "Ordinal" );
+
+// Add a column for GrowthID, pulling the data from the wafer ID
+growthCol = dt1 << New Column( "Growth" );
+growthCol << Set Formula(
+	Left(:Wafer, 8)
+);
+growthCol << EvalFormula;
+growthCol << Modeling Type( "Ordinal" );
+
+// Set other columns to Ordinal
+Column( "Wafer" ) << Modeling Type( "Ordinal" );
+Column( "growth_date" ) << Modeling Type( "Ordinal" );
+
+dt1 << Sort By Column( "Growth" );
+
+// Create a simple graph for run chart.
+obj = dt1 << Graph Builder(
+	Size( 1200, 400 ),
+	Show Control Panel( 0 ),
+	Variables( X( :Wafer ), Y( :AWTDYield ), Overlay( :Mask ) ),
+	Elements(
+		Line( X, Y, Legend( 4 ), Row order( 0 ), Summary Statistic( "Mean" ) ),
+		Points( X, Y, Legend( 5 ), Jitter( 1 ) )
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"Wafer",
+			ScaleBox,
+			{Show Major Grid( 1 ), Show Minor Grid( 1 ),
+			Rotated Labels( "Vertical" )}
+		),
+		Dispatch(
+			{},
+			"AWTDYield",
+			ScaleBox,
+			{Min( 0 ), Max( 100 ), Inc( 10 ), Minor Ticks( 1 ), Show Major Grid( 1 ),
+			Show Minor Grid( 1 )}
+		),
+		Dispatch(
+			{},
+			"graph title",
+			TextEditBox,
+			{Set Text( "PTD Probe Yield by Growth" )}
+		),
+		Dispatch( {}, "Y title", TextEditBox, {Set Text( "Yield (%)" )} ),
+		Dispatch( {}, "Graph Builder", FrameBox, {Marker Size( 4 )} )
+	)
+);
+
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Simple Run Chart");
