@@ -1,0 +1,175 @@
+
+// Connect to the PowerSQL database and query TLM data
+Open Database("DSN=PowerSQL;UID=guang;PWD=wu1204;SERVER={115-db};DATABASE=test;PORT=3306;",
+"Select Distinct
+  ucase(t1.Lotnum) as Lot,
+  ucase(t1.Wafer) as Wafer,
+  ucase(t1.Mask) as Mask,
+  t1.TestNum,
+  t1.FileName,
+  t1.TestDate,
+  t1.SubstrateID,
+  t1.Process_Step,
+  Ucase(t1.DeviceName) as DeviceName,
+  t1.DeviceSize,
+  t1.Operator,
+  t1.Substrate,
+  t1.Info,
+  t2.Die_Row,
+  t2.Die_Col,
+  t2.TestType,
+  t2.Rsh_Cal as Rsh,
+  t2.Rc as Rc,
+  t2.Rsq
+FROM
+  tbl_test as t1 INNER JOIN tbl_attribute as t2 ON t2.MeasID = T1.MeasID  
+WHERE
+  (t2.TestDate Between '2005-01-01' And '2015-01-01') AND ((t2.TestType='Ohmic TLM'))   
+ORDER BY
+  t1.Lotnum,
+  t1.Process_Step,
+  t1.testnum,
+  t1.devicesize,
+  t1.Wafer,
+  t1.Piecename,
+  t2.Testtype,
+  t1.devicename,
+  t2.Die_Row,
+  t2.Die_Col;",
+	"OWT_Data" //Output Table Name
+);
+
+// Create a variable for the table
+OWT_Data_Table=data table("OWT_Data");
+
+// Change some column properties
+Column("Lot") << Data Type("Character") << Modeling Type("Nominal");
+Column("TestNum") << Data Type("Character") << Modeling Type("Nominal");
+Column("TestDate") << Data Type("Numeric", Format("m/d/y h:m:s")) << Modeling Type("Continuous");
+Column("DeviceSize") << Data Type("Numeric") << Modeling Type ("Continuous");
+
+// Add a column for the data weight
+OWT_Data_Table << NewColumn("Weight",
+	Numeric,
+	Continuous,
+	Formula(
+		Exp(Rsq*10+1)/Exp(1*10+1)
+	)
+);
+
+// Connect to the WIPTrac database and query RTA data
+Open Database("DSN=PostgreSQL30;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21;CA=d;A6=;A7=100;A8=4096;B0=255;B1=8190;BI=0;C2=dd_;CX=1c502bb;A1=7.4",
+"SELECT DISTINCT
+  device.lot_num as rta_lot, 
+  history.date_in as rta_in_timestamp, 
+  history.date_out as rta_out_timestamp,  
+  serial.serial_num as wiptrac_serial, 
+  serial.vendorserial_num as wiptrack_vendorserial, 
+  part.partnum, 
+  spcdata.spc_value as rta_slot
+FROM 
+  public.device, 
+  public.history, 
+  public.op, 
+  public.serial, 
+  public.parttype, 
+  public.part, 
+  public.spcdata, 
+  public.spcprog, 
+  public.spcditem
+WHERE 
+  history.device_id = device.device_id AND
+  op.op_id = history.op_id AND
+  op.op_id = spcdata.spc_op_id AND
+  parttype.parttype_id = part.parttype_id AND
+  part.part_id = device.part_id AND
+  spcdata.spc_device_id = device.device_id AND
+  spcdata.spc_history_id = history.history_id AND
+  spcdata.spcditem_id = spcditem.spcditem_id AND
+  spcdata.spc_serial_id = serial.serial_id AND
+  spcditem.spcprog_id = spcprog.spcprog_id AND
+  op.op_name = 'ANNEAL-SDO'
+ORDER BY
+  device.lot_num ASC, 
+  serial.serial_num ASC;",
+  	"Anneal_Data" //Output Table Name
+  );
+
+// Create a variable for the table
+Anneal_Data_Table=data table("Anneal_Data");
+
+// Change some column properties
+Column("rta_lot") << Data Type("Character") << Modeling Type("Nominal");
+Column("rta_in_timestamp") << Data Type("Numeric", Format("m/d/y h:m:s")) << Modeling Type("Continuous");
+Column("rta_out_timestamp") << Data Type("Numeric", Format("m/d/y h:m:s")) << Modeling Type("Continuous");
+Column("rta_slot") << Data Type("Numeric") << Modeling Type ("Continuous");
+
+// Connect to the WIPTrac db again and query the e-beam data
+Open Database("DSN=PostgreSQL30;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21;CA=d;A6=;A7=100;A8=4096;B0=255;B1=8190;BI=0;C2=dd_;CX=1c502bb;A1=7.4",
+"SELECT 
+  device.lot_num as ebeam_lot, 
+  serial.serial_num as ebeam_serial, 
+  history.date_in as ebeam_in_timestamp, 
+  history.date_out as ebeam_out_timestamp, 
+  equip.equip_name as ebeam_id
+FROM 
+  public.device, 
+  public.serial, 
+  public.history, 
+  public.op, 
+  public.equip
+WHERE 
+  serial.device_id = device.device_id AND
+  history.device_id = device.device_id AND
+  history.equip_id = equip.equip_id AND
+  op.op_id = history.op_id AND
+  equip.equip_name LIKE 'E-BEAM%' AND
+  op.op_name = 'METAL_DEPOSIT-SDO';",
+  	"Metal_Dep_Data" //Output Table Name
+  );
+
+// Create a variable for the table
+Metal_Dep_Data_Table=data table("Metal_Dep_Data");
+
+// Change some column properties
+Column("ebeam_lot") << Data Type("Character") << Modeling Type("Nominal");
+Column("ebeam_in_timestamp") << Data Type("Numeric", Format("m/d/y h:m:s")) << Modeling Type("Continuous");
+Column("ebeam_out_timestamp") << Data Type("Numeric", Format("m/d/y h:m:s")) << Modeling Type("Continuous");
+Column("ebeam_id") << Data Type("Character") << Modeling Type("Nominal");
+
+// Join the RTA and E-Beam data into a temporary table
+Anneal_Data_Table << Join(
+	With(Metal_Dep_Data_Table),
+	By Matching Columns(:wiptrac_serial == :ebeam_serial),
+	Output Table ("temptable")
+);
+
+// Join the WIPTrac data to the PowerSQL data
+OWT_Data_Table << Join(
+	With(data table("temptable")),
+	By Matching Columns(:SubstrateID == :wiptrac_serial),
+	Output Table ("Result")
+);
+
+// Add a column for the time delay between e-beam and RTA
+Data Table("Result") << NewColumn("Processing Delay (hrs)",
+	Numeric,
+	Continuous,
+	Formula(
+		(rta_in_timestamp - ebeam_out_timestamp ) / 3600
+	)
+);
+
+// Close extra tables
+Close(OWT_Data_Table);
+Close(Anneal_Data_Table);
+Close(Metal_Dep_Data_Table);
+Close(data table("temptable"));
+
+Data Table("Result") << Sort(
+	By(Lot),
+	Order(Ascending),
+	Output Table("Rc, RTA, and E-Beam Data")
+);
+
+Close(Data Table("Result"));

@@ -1,0 +1,33 @@
+
+/*//////////////////////////////////////////////////////////
+Script to query what wafers are in the Testing Storage
+boxes.
+
+
+*///////////////////////////////////////////////////////////
+
+Names Default To Here(1);
+
+owt_conn = "DSN=OWT_x64;UID=owt_user;PWD={owtuser};SERVER={115-db};DATABASE=owt;PORT=3306;";
+
+wiptrac_conn = "DSN=PostgreSQL30_x64;DATABASE=wiptrac;SERVER=192.168.11.30;PORT=5432;UID=wiptracreader;PWD=Trans4m%21";
+
+
+owt_query = "
+SELECT *
+FROM testing_storage
+";
+
+dt1 = Open Database(owt_conn, owt_query, "temp");
+
+subCol = dt1 << New Column("WIPTrac Substrate ID", Character);
+subCol << Set Formula( If(Is Missing(:substrate_id), :physical_id, :substrate_id) );
+subCol << EvalFormula;
+
+
+wiptrac_query = "
+WITH
+	t1 AS (
+		SELECT
+			
+		"
