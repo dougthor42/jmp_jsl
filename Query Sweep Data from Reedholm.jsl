@@ -1,0 +1,76 @@
+Names Default To Here(1);
+
+conn = "DSN=Reedholm_x64;UID=owt_read;PWD=owtread;APP=JMP;WSID=THORIUM;DATABASE=RIWEBSQL";
+
+Lot_Name = "1401-5";
+Device_Name = "D.SIL6MDH27AAB.Product";
+Process_Name = "P.SIL6MDH27AAB";
+StepName = "PS.6in.M3";
+
+sqlString1 = Concat Items(
+	{"EXECUTE dbo.[_TPH_GetLotID]
+	@Lot_Name = '", Lot_Name, "',
+	@Device_Name = '", Device_Name, "',
+	@Process_Name = '", Process_Name, "',
+	@StepName = '", StepName, "'"}, "");
+
+Show(sqlString1);
+
+dt1 = Open Database(conn, sqlString1, "tempTable");
+
+temp = dt1:Lot_ID[1];
+Close(dt1, No Save);
+temp=10159;
+Show(temp);
+
+sqlString2 = Concat Items(
+	{"EXECUTE dbo.[_TPH_ExportSweepData]
+	@Lot_ID = ", Char(temp), ""},
+	"");
+
+Show(sqlString2);
+
+Open Database(conn, sqlString2, Char(temp));
+
+// Take the Die_Name column and parse it for die coords
+xCoordCol = New Column("X Coord (Column)");
+xCoordCol << Set Formula(
+	Num(Substr(:Die_Name, 2, Munger(:Die_Name, 0, "y") - 2))
+);
+xCoordCol << EvalFormula;
+
+yCoordCol = New Column("Y Coord (Row)");
+yCoordCol << Set Formula(
+	Num(Substr(:Die_Name, Munger(:Die_Name, 0, "y") + 1))
+);
+yCoordCol << EvalFormula;
+
+// Add a Voltage (V) column that takes XValue and rounds it.
+voltageCol = New Column("Voltage (V)");
+voltageCol << Set Formula(
+	Round(:XValue)
+);
+
+// Add a Log10 column that takes Log10(Abs(YValue1)).
+log10Col = New Column("Log10 Abs Current (A)");
+log10Col << Set Formula(
+	Log10(Abs(:YValue1))
+);
+
+// Add a mA/mm column. Assume 120mm
+log10Col = New Column("Is (mA/mm)");
+log10Col << Set Formula(
+	:YValue1 * 1000 / 120
+);
+
+// Add a Log10 (mA/mm) column that takes Log10(Abs(Is (mA/mm))).
+log10Col = New Column("Log10 Abs Is (mA/mm)");
+log10Col << Set Formula(
+	Log10(Abs(:Name("Is (mA/mm)")))
+);
+
+// Add a Radius (mm) column.
+radiusCol = New Column("Radius (mm)");
+radiusCol << Set Formula(
+	Root((2.43 * (:Name("X Coord (Column)") - 31.5)) ^ 2 + (3.3 * (:Name("Y Coord (Row)") - 24)) ^ 2, Empty())
+);

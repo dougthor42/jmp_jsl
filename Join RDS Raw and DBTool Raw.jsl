@@ -1,0 +1,13 @@
+Data Table( "1335-3.4 130222AC-6 Rev Wafer" ) << Join(
+	With( Data Table( "1335-3.4 130222AC-6 Keithley AP9 Chk Float" ) ),
+	Select( :Test_Name, :Result, :Name( "Log(Result) (mA/mm)" ) ),
+	SelectWith( :Name( "Log(Ir_600) (mA/mm)" ), :Name( "Log(Ir_700) (mA/mm)" ) ),
+	By Matching Columns(
+		:Name( "x (Column)" ) = :Column,
+		:Name( "y (Row)" ) = :Row
+	),
+	Drop multiples( 0, 0 ),
+	Name( "Include non-matches" )(0, 0),
+	Preserve main table order( 1 ),
+	Output Table( "temp" )
+)

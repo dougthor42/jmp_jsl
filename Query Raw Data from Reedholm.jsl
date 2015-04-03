@@ -1,0 +1,183 @@
+//!
+
+Names Default To Here(1);
+
+// Define the DBTool database connection string
+conn = "DSN=Reedholm_x64;UID=owt_read;PWD=owtread;APP=JMP;WSID=THORIUM;DATABASE=RIWEBSQL";
+/*
+Lot_Name = "1405-4";
+Device_Name = "D.SIL6MDH27AAB.Product";
+Process_Name = "P.SIL6MDH27AAB";
+StepName = "PS.6in.M3";
+
+sqlString1 = Concat Items(
+	{"EXECUTE dbo.[_TPH_GetLotID]
+	@Lot_Name = '", Lot_Name, "',
+	@Device_Name = '", Device_Name, "',
+	@Process_Name = '", Process_Name, "',
+	@StepName = '", StepName, "'"}, "");
+
+Show(sqlString1);
+
+dt1 = Open Database(conn, sqlString1, "tempTable");
+
+temp = dt1:Lot_ID[1];
+Close(dt1, No Save);
+*/
+//temp = 10170;
+//Show(temp);
+
+
+// Prompt user for Lot IDs
+a =	New Window(
+		"Enter the Reedholm Lot ID:",
+		<< Modal,
+		Text Box("Enter the Reedholm Lot ID:"),
+		editBox = Number Edit Box(),
+		Button Box( "OK" ),
+		Button Box( "Cancel" )
+);
+If( a["Button"] == -1,
+	Throw()
+);
+
+// Get the contents of the Number Edit Box
+lot_id = editBox << get;
+Show(lot_id);
+
+// Create the SQL string that we're going to execute
+sqlString2 = Concat Items(
+	{"EXECUTE dbo.[_TPH_ExportLotData]
+	@Lot_ID = ", Char(lot_id)},
+	"");
+
+Show(sqlString2);
+
+// Execute the string into a table with the tablename = lot_id
+dt1 = Open Database(conn, sqlString2, Char(lot_id));
+
+// Take the Die_Name column and parse it for die coords
+xCoordCol = New Column("X Coord (Column)");
+xCoordCol << Set Formula(
+	Num(Substr(:Die_Name, 2, Munger(:Die_Name, 0, "y") - 2))
+);
+xCoordCol << EvalFormula;
+
+yCoordCol = New Column("Y Coord (Row)");
+yCoordCol << Set Formula(
+	Num(Substr(:Die_Name, Munger(:Die_Name, 0, "y") + 1))
+);
+yCoordCol << EvalFormula;
+
+// Figure out what mask we're using and then set the equation for Radius.
+// No need to create new columns - we should only have 1 mask per lot.
+// Take the 7th through 11th characters of the Device_Name 
+// (D.SIL607G13TPJ.Product.Ron) to get the mask.
+mask = Substr( Column( "Device_Name" )[1], 7, 5);
+Show(mask);
+
+// Lookup the Die Size (X, Y). Assume 07G11 if not found.
+dieSize = Match(
+	mask,
+	"MDH27", {4.34, 6.44},
+	"07G11", {2.43, 3.3},
+	"07G13", {4.37, 6.47},
+	"07G14", {2.33, 2.07},
+	{2.43, 3.3}
+);
+
+// Look up the CenterXY coord. Assume 07G11 if not found.
+centerXY = Match(
+	mask,
+	"MDH27", {18.5, 12.5},
+	"07G11", {29, 21},
+	"07G13", {16.5, 9.5},
+	"07G14", {30.5, 33.5},
+	{2.43, 3.3}
+);
+
+// Add a Radius (mm) column.
+radiusCol = New Column("Radius (mm)");
+radiusCol << Set Formula(
+	Root(
+		(dieSize[1] * (:Name("X Coord (Column)") - centerXY[1])) ^ 2
+		+ 
+		(dieSize[2] * (:Name("Y Coord (Row)") - centerXY[2])) ^ 2,
+		Empty()
+	)
+);
+radiusCol << EvalFormula;
+
+// Add a Radius^2 column.
+radius2Col = New Column("Radius^2");
+radius2Col << Set Formula(
+	:Name( "Radius (mm)" )^2 
+);
+radius2Col << EvalFormula;
+
+// Add a Rdson Column.
+rdsonCol = New Column("Rdson");
+rdsonCol << Set Formula(
+	:Result * 324.3
+);
+rdsonCol << EvalFormula;
+/*
+obj = dt1 << Graph Builder(
+	Show Control Panel( 0 ),
+	Variables( X( :Wafer_Name ), Y( :Result ), Overlay( :Test_Name ) ),
+	Elements(
+		Box Plot(
+			X,
+			Y,
+			Legend( 3 ),
+			Jitter( 1 ),
+			Outliers( 1 ),
+			Box Style( "Outlier" )
+		)
+	)
+);
+
+obj << Save Script to DataTable;
+dt1 << Rename Table Property("Graph Builder", "Box Plots by Wafer and TestName");
+
+Graph Builder(
+	Show Control Panel( 0 ),
+	Variables(
+		X( :Name( "X Coord (Column)" ) ),
+		Y( :Name( "Y Coord (Row)" ) ),
+		Wrap( :Wafer_Name ),
+		Color( :Result )
+	),
+	Elements(
+		Points( X, Y, Legend( 1 ), Jitter( 1 ) )
+	),
+	Local Data Filter(
+		Location( {557, 144} ),
+		Mode( Select( 0 ), Show( 1 ), Include( 1 ) ),
+		Add Filter(
+			columns( :Test_Name ),
+			Where( :Test_Name == "HEMT.D.Ron_25.300mm" ),
+			Display( :Test_Name, Size( 204, 38 ), List Display )
+		)
+	),
+	SendToReport(
+		Dispatch(
+			{},
+			"400",
+			ScaleBox,
+			{Legend Model(
+				1,
+				Properties(
+					0,
+					{gradient(
+						{Label Levels(
+							[0.03 0.031 0.032 0.033 0.034 0.035 0.036 0.037 0.038
+							0.039 0.04]
+						)}
+					)}
+				)
+			)}
+		)
+	)
+);
+*/

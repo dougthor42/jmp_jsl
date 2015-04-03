@@ -1,0 +1,16 @@
+column name(1) << Set Name("Lot");
+column name(2) << Set Name("Growth");
+column name(3) << Set Name("Mask");
+column name(4) << Set Name("TestNum");
+column name(5) << Set Name("FileName");
+column name(6) << Set Name("Date");
+column name(7) << Set Name("Substrate");
+column name(8) << Set Name("Done");
+column name(9) << Set Name("Process Step");
+column name(10) << Set Name("Device Name");
+column name(11) << Set Name("Device Size (mm)");
+column name(12) << Set Name("Piece Name");
+column name(13) << Set Name("Dia (mm)");
+column name(14) << Set Name("PartNum");
+column name(15) << Set Name("Row (Y)");
+column name(16) << Set Name("Column (X)");

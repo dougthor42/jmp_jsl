@@ -1,0 +1,64 @@
+Names Default To Here(1);
+
+conn = "DSN=Reedholm_x64;UID=owt_read;PWD=owtread;APP=JMP;WSID=THORIUM;DATABASE=RIWEBSQL";
+
+sqlString2 = Concat Items(
+	{"EXECUTE dbo.[_TPH_GetBuildSweepData]
+	@xPOI = ", "700"},
+	"");
+
+sqlString2 = "EXECUTE dbo.[_TPH_GetBuildSweepData]";
+
+Show(sqlString2);
+
+dt1 = Open Database(conn, sqlString2, "temp");
+dt1 << new column("Voltage (V)");
+col = column("Voltage (V)");
+col << data type(numeric);
+col << Set Formula(Round(:Name("XValue"),0));
+col << EvalFormula;
+
+dt1 << new column("Expected Current (nA)");
+col = column("Expected Current (nA)");
+col << data type(numeric);
+col << Set Formula(:Name("Voltage (V)") / 100);
+col << EvalFormula;
+
+dt1 << new column("Measured Current (nA)");
+col = column("Measured Current (nA)");
+col << data type(numeric);
+col << Set Formula(:Name("YValue1") * 1e9);
+col << EvalFormula;
+
+dt1 << new column("Error (%)");
+col = column("Error (%)");
+col << data type(numeric);
+col << Set Formula(
+	Abs(
+	(:Name("Measured Current (nA)") - :Name("Expected Current (nA)")) /
+		:Name("Expected Current (nA)")) * 100
+	);
+col << EvalFormula;
+col = column("TimePerLoop");
+/*col << data type(numeric);*/
+
+time = :TimePerLoop << get values;
+show(time[1]);
+
+Data Table( "temp" ) << Summary(
+	Group( :Name("Expected Current (nA)") ),
+	Mean( :Name("Error (%)") ),
+	Link to original data table( 0 ),
+	output table name( "summary" )
+);
+
+
+
+median = :"Median (YValue1)" << get values;
+stdev = :"Std Dev (YValue1)" << get values;
+Show(median[15] * 1e9);
+Show(stdev[15] * 1e9);
+Show(stdev[15] / median[15] * 100);
+
+/*Close(dt1, No Save);*/
+/*Close("summary", No Save);*/

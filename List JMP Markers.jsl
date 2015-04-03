@@ -1,0 +1,20 @@
+New Window( "Markers",
+Graph Box(
+FrameSize( 300, 300 ),
+Y Scale( -1, 16 ),
+X Scale( 0, 7 ),
+For(
+i = 0;
+jj = 15;,
+i < 16;
+jj >= 0;,
+i++;
+jj--;, // 16 rows, 2 columns
+Marker Size( 3 );
+Marker( i, {1, jj + .2} ); // markers 0-15
+Marker( i + 16, {4, jj + .2} ); // markers 16-31
+Text( {1.5, jj}, "marker ", i ); // marker labels 0-15
+Text( {4.5, jj}, "marker ", i + 16 ); // marker labels 16-31
+)
+)
+);

@@ -1,0 +1,39 @@
+Text Color( 0 );
+New Window( "Colors",
+Graph Box(
+FrameSize( 640, 400 ),
+Y Scale( -1, 17 ),
+X Scale( -3, 12 ),
+k = 0;
+For( jj = 1, jj <= 12, jj += 2,
+l = 15;
+For( i = 0, i <= 15 & k < 85, i++,
+thiscolor = Color To RGB( k );
+Fill Color( k );
+thisfill = 1;
+If( thiscolor == {1, 1, 1},
+Pen Color( 0 );
+thisfill = 0;
+,
+Pen Color( k )
+);
+Rect( jj, l + .5, jj + .5, l, thisfill );
+Text( {jj - 1, l}, "color ", k );
+k++;
+l--;
+);
+);
+jj = -2;
+color = {"Black", "Gray", "White", "Red", "Green", "Blue", "Orange",
+"BlueGreen",
+"Purple", "Yellow", "Cyan", "Magenta", "YellowGreen", "BlueCyan",
+"Fuschia", "Black"};
+For(
+i = 0;
+l = 15;, i <= 15 & l >= 0,
+i++;
+l--;,
+Text( {jj, l}, color[i + 1] )
+);
+)
+);

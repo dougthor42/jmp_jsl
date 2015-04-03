@@ -1,0 +1,17 @@
+Try (
+	dt1 = Open(),
+	Throw( "Invalid Data Table" )
+);
+
+// Take the Die_Name column and parse it for die coords
+xCoordCol = New Column("X Coord (Column)");
+xCoordCol << Set Formula(
+	Num(Substr(:Die_Name, 2, Munger(:Die_Name, 0, "y") - 2))
+);
+xCoordCol << EvalFormula;
+
+yCoordCol = New Column("Y Coord (Row)");
+yCoordCol << Set Formula(
+	Num(Substr(:Die_Name, Munger(:Die_Name, 0, "y") + 1))
+);
+yCoordCol << EvalFormula;

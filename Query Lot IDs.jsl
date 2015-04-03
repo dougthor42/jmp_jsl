@@ -1,0 +1,35 @@
+//!
+
+// Line 1 makes script run on open.
+
+Names Default To Here(1);
+
+conn = "DSN=Reedholm_x64;UID=owt_read;PWD=owtread;APP=JMP;WSID=THORIUM;DATABASE=RIWEBSQL";
+
+sqlString1 = "
+SELECT
+	a.Lot_ID,
+	a.Lot_Name,
+	b.Device_Name,
+	a.Date_Time,
+	a.Finish_DT,
+	a.Device_ID,
+	a.Device_Version,
+	a.Process_ID,
+	a.User_ID,
+	a.Tester_ID,
+	a.Step_ID
+FROM dbo.Tested_Lots AS a
+INNER JOIN dbo.Device_Names AS b
+ON a.Device_ID = b.Device_ID
+";
+
+dt1 = Open Database(conn, sqlString1);
+
+dt1 << Sort(
+	Replace Table,
+	By(:Lot_ID),
+	Order(Descending)
+	);
+
+dt1 << Delete Table Property("Save To DB")
