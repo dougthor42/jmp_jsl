@@ -1,0 +1,20 @@
+Data Table( "Summary2" ) <<
+	NewColumn( "Skewness",
+		Numeric,
+		Continuous,
+		Formula( :Name("Sum(Skewness)") / ((:N - 1) * :Std Dev Qbd ^ 3) )
+	);
+	
+Data Table( "Summary2" ) <<
+	NewColumn( "Kurtosis",
+		Numeric,
+		Continuous,
+		Formula( :Name("Sum(Kurtosis)") / ((:N - 1) * :Std Dev Qbd ^ 4) - 3 )
+	);
+	
+Data Table( "Summary2" ) <<
+	NewColumn( "Bimodality Coeff",
+		Numeric,
+		Continuous,
+		Formula( (:Skewness ^ 2 + 1) / (:Kurtosis + (3 * (:N - 1) ^ 2) / ((:N - 2) * (:N - 3))) )
+	);

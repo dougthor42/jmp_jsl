@@ -1,0 +1,18 @@
+Data Table( "Raw Data" ) <<
+Join(
+	With(
+		Data Table(
+			"Summary - 1st Round"
+		)
+	),
+	Merge Same Name Columns,
+	By Matching Columns(
+		:Name( "Device" ) = :Name( "Device" ),
+		:Name( "Size" ) = :Name( "Size" ),
+		:Name( "Current Stres (A)" ) = :Name( "Current Stres (A)" ),
+		:Name( "Stress (mA/mm^2)" ) = :Name( "Stress (mA/mm^2)" )
+	),
+	Drop multiples( 0, 0 ),
+	Name( "Include non-matches" )(0, 0),
+	Output Table( "Raw with Summary1" )
+)

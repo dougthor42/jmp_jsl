@@ -1,0 +1,25 @@
+queryString = "
+SELECT Graph_ID FROM LotData_GraphInfo WHERE Lot_ID=
+(SELECT Lot_ID FROM Tested_Lots WHERE Lot_Name='GDI - Initial Testing')
+";
+
+Open Database(
+	"DSN=Reedholm_x64;UID=sa;PWD=sa1;APP=JMP;WSID=THORIUM;DATABASE=RIWEBSQL",
+	queryString,
+	"tempTable"
+)
+
+/*
+a = SELECT Lot_ID FROM Tested_Lots WHERE Lot_Name='GDI - Initial Testing';
+// Here I'll also have to add some stuff for the Wafer
+b,c,d,e = SELECT GraphID, WaferOrder, DieOrder, IntraDieOrder FROM LotData_GraphInfo WHERE Lot_ID = a;
+SELECT PointNum, XValue, YValue1 FROM Graph_Data WHERE Graph_ID = b;
+// Get the Row-Column values for each die
+f = SELECT Die_ID FROM LotDie WHERE Lot_ID = d;
+g = SELECT Die_Name FROM Die_Names WHERE Die_ID = f;
+// The Die_Name should be in the x#y# format, and can be parsed for the die coords.
+
+h = SELECT Wafer_ID from Wafer_Names WHERE Wafer_Name = substrate;
+SELECT WaferOrder FROM LotWafers WHERE Lot_ID=a and Wafer_ID = h
+
+*/

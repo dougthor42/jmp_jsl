@@ -1,0 +1,15 @@
+Data Table( "Raw with Summary1" ) << Summary(
+	Group(
+		:Device,
+		:Size,
+		:Current Stress,
+		:Name( "Temperature (C)" ),
+		:Name( "Stress (mA/mm^2)" )
+	),
+	Mean( :Name( "Qbd (mA/mm^2)" ) ),
+	Std Dev( :Name( "Qbd (mA/mm^2)" ) ),
+	N( :Name( "Qbd (mA/mm^2)" ) ),
+	Sum( :Skewness ),
+	Sum( :Kurtosis ),
+	data table name( "Summary2" )
+)

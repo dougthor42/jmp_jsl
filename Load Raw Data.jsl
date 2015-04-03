@@ -1,0 +1,35 @@
+Open(
+	"C:\Temp\Current Stress group1 - C7 and C1.csv",
+	columns(
+		Name( "Lot" ) = Character,
+		Name( "Wafer" ) = Character,
+		Name( "Device" ) = Character,
+		Name( "Size" ) = Numeric,
+		Name( "Params" ) = Character,
+		Name( "Additional Info" ) = Character,
+		Name( "Row" ) = Numeric,
+		Name( "Column" ) = Numeric,
+		Name( "Current Stres (A)" ) = Numeric,
+		Name( "T_Final" ) = Numeric,
+		Name( "V_final (V)" ) = Numeric,
+		Name( "Test Timestamp - File" ) = Numeric,
+		Name( "Test Timestamp - Die" ) = Numeric,
+		Name( "Process Step" ) = Character,
+		Name( "Mask" ) = Character,
+		Name( "Temperature (C)" ) = Character,
+		Name( "Stress (mA/mm^2)" ) = Numeric,
+		Name( "Index" ) = Numeric
+	),
+	Import Settings(
+		End Of Line( CRLF, CR, LF ),
+		End Of Field( Comma ),
+		Strip Quotes( 0 ),
+		Use Apostrophe as Quotation Mark( 0 ),
+		Scan Whole File( 1 ),
+		Labels( 1 ),
+		Column Names Start( 1 ),
+		Data Starts( 2 ),
+		Lines To Read( All ),
+		Year Rule( "10-90" )
+	)
+)

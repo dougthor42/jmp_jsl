@@ -1,0 +1,14 @@
+Data Table( "Current Stress group1 - C7 and C1 3" ) <<
+Summary(
+	Group(
+		:Name( "Device" ),
+		:Name( "Size" ),
+		:Name( "Current Stress (A)" ),
+		:Name( "Stress (mA/mm^2)" ),
+		:Name( "Temperature (C)" )
+	),
+	Mean( :Name( "Qbd (mA/mm^2)" ) ),
+	Std Dev( :Name( "Qbd (mA/mm^2)" ) ),
+	N( :Name( "Qbd (mA/mm^2)" ) ),
+	output table name( "Summary - 1st Round")
+)

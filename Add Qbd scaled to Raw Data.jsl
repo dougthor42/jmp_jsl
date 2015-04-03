@@ -1,0 +1,6 @@
+Data Table( "Current Stress group1 - C7 and C1" ) <<
+	NewColumn("Qbd (mA/mm^2)",
+		Numeric,
+		Continuous,
+		Formula( :Name("Current Stress (A)") * (:T_Final / :Size))
+	);

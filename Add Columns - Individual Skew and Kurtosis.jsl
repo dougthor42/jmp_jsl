@@ -1,0 +1,13 @@
+Data Table( "Raw with Summary1" ) <<
+	NewColumn( "Skewness",
+		Numeric,
+		Continuous,
+		Formula( ((:Name("Qbd (mA/mm^2)") - :Name("Mean(Qbd)")) / :Name("Std Dev(Qbd)")) ^ 3 * (:N / ((:N - 1) * (:N - 2)) ) )
+	);
+	
+Data Table( "Raw with Summary1" ) <<
+	NewColumn( "Kurtosis",
+		Numeric,
+		Continuous,
+		Formula( ((:Name("Qbd (mA/mm^2)") - :Name("Mean(Qbd)")) / :Name("Std Dev(Qbd)")) ^ 4 )
+	);

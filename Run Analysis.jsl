@@ -1,0 +1,142 @@
+// Comment
+/* Open the data file */
+dt_rawdata = Open(
+	"C:\Temp\Current Stress.csv",
+	columns(
+		Name( "Lot" ) = Character,
+		Name( "Wafer" ) = Character,
+		Name( "Device" ) = Character,
+		Name( "Size" ) = Numeric,
+		Name( "Params" ) = Character,
+		Name( "Additional Info" ) = Character,
+		Name( "Row" ) = Numeric,
+		Name( "Column" ) = Numeric,
+		Name( "Current Stres (A)" ) = Numeric,
+		Name( "T_Final" ) = Numeric,
+		Name( "V_final (V)" ) = Numeric,
+		Name( "Test Timestamp - File" ) = Numeric,
+		Name( "Test Timestamp - Die" ) = Numeric,
+		Name( "Process Step" ) = Character,
+		Name( "Mask" ) = Character,
+		Name( "Temperature (C)" ) = Character,
+		Name( "Stress (mA/mm^2)" ) = Numeric,
+		Name( "Index" ) = Numeric
+	),
+	Import Settings(
+		End Of Line( CRLF, CR, LF ),
+		End Of Field( Comma ),
+		Strip Quotes( 0 ),
+		Use Apostrophe as Quotation Mark( 0 ),
+		Scan Whole File( 1 ),
+		Labels( 1 ),
+		Column Names Start( 1 ),
+		Data Starts( 2 ),
+		Lines To Read( All ),
+		Year Rule( "10-90" )
+	),
+	Output Table( "Raw Data" )
+);
+dt_rawdata << Set Name("Raw Data");
+
+//Add a Qbd column to the Raw Data table
+Data Table( "Raw Data" ) <<
+	NewColumn("Qbd (mA/mm^2)",
+		Numeric,
+		Continuous,
+		Formula( :Name("Current Stress (A)") * (:T_Final / :Size))
+	);
+
+//Summarize the Data Table
+Data Table( "Raw Data" ) <<
+Summary(
+	Group(
+		:Name( "Device" ),
+		:Name( "Size" ),
+		:Name( "Current Stress (A)" ),
+		:Name( "Stress (mA/mm^2)" ),
+		:Name( "Temperature (C)" )
+	),
+	Mean( :Name( "Qbd (mA/mm^2)" ) ),
+	Std Dev( :Name( "Qbd (mA/mm^2)" ) ),
+	Median( :Name( "Qbd (mA/mm^2)" ) ),
+	N( :Name( "Qbd (mA/mm^2)" ) ),
+	output table name( "Summary - 1st Round" )
+);
+
+//Join the summarized info to the Raw Data table.
+Data Table( "Raw Data" ) <<
+Join(
+	With(
+		Data Table(
+			"Summary - 1st Round"
+		)
+	),
+	Merge Same Name Columns,
+	By Matching Columns(
+		:Name( "Device" ) = :Name( "Device" ),
+		:Name( "Size" ) = :Name( "Size" ),
+		:Name( "Current Stress (A)" ) = :Name( "Current Stress (A)" ),
+		:Name( "Stress (mA/mm^2)" ) = :Name( "Stress (mA/mm^2)" )
+	),
+	Drop multiples( 0, 0 ),
+	Name( "Include non-matches" )(0, 0),
+	Output Table( "Raw with Summary1" )
+);
+
+//Add columns for Skew and Kurtosis which get summed up for true Skewness and Kurtosis calculations
+Data Table( "Raw with Summary1" ) <<
+	NewColumn( "Skewness",
+		Numeric,
+		Continuous,
+		Formula( ((:Name("Qbd (mA/mm^2)") - :Name("Mean(Qbd (mA/mm^2))")) / :Name("Std Dev(Qbd (mA/mm^2))")) ^ 3 )
+	);
+	
+Data Table( "Raw with Summary1" ) <<
+	NewColumn( "Kurtosis",
+		Numeric,
+		Continuous,
+		Formula( ((:Name("Qbd (mA/mm^2)") - :Name("Mean(Qbd (mA/mm^2))")) / :Name("Std Dev(Qbd (mA/mm^2))")) ^ 4 )
+	);
+	
+//Summarize the data again, which sums up the kurt and skew columns
+dt_summary1 = Data Table( "Raw with Summary1" ) << Summary(
+	Group(
+		:Device,
+		:Size,
+		:Current Stress,
+		:Name( "Temperature (C)" ),
+		:Name( "Stress (mA/mm^2)" )
+	),
+	Mean( :Name( "Qbd (mA/mm^2)" ) ),
+	Std Dev( :Name( "Qbd (mA/mm^2)" ) ),
+	Median( :Name( "Qbd (mA/mm^2)" ) ),
+	N( :Name( "Qbd (mA/mm^2)" ) ),
+	Sum( :Skewness ),
+	Sum( :Kurtosis )
+);
+
+current data table() << Set Name( "Summary2" );
+
+//Add true Skewness, Kurtosis, and Bimodality Coefficient to Summary2
+Data Table( "Summary2" ) <<
+	NewColumn( "Skewness",
+		Numeric,
+		Continuous,
+		Formula( :Name("Sum(Skewness)") * ((:Name("N Rows")) / ((:Name("N Rows") - 1) * (:Name("N Rows") - 2))) )
+	);
+	
+Data Table( "Summary2" ) <<
+	NewColumn( "Kurtosis",
+		Numeric,
+		Continuous,
+		Formula( ((:Name("N(Qbd (mA/mm^2))") * (:Name("N(Qbd (mA/mm^2))") + 1)) / ((:Name("N(Qbd (mA/mm^2))") - 1) * (:Name("N(Qbd (mA/mm^2))") - 2) * (:Name("N(Qbd (mA/mm^2))") - 3))) * :Name("Sum(Kurtosis)") - (3 * (:Name("N(Qbd (mA/mm^2))") - 1) ^ 2) / ((:Name("N(Qbd (mA/mm^2))") - 2) * (:Name("N(Qbd (mA/mm^2))") - 3)) )
+	);
+	
+Data Table( "Summary2" ) <<
+	NewColumn( "Bimodality Coeff",
+		Numeric,
+		Continuous,
+		Formula( (:Skewness ^ 2 + 1) / (:Kurtosis + (3 * (:Name("N Rows") - 1) ^ 2) / ((:Name("N Rows") - 2) * (:Name("N Rows") - 3))) )
+	);
+	
+Close( dt_rawdata, No save );
