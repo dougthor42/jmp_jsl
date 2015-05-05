@@ -1,0 +1,179 @@
+//!
+
+Names Default to Here(1);
+
+// Prompt the user for the file to load.
+a = New Window(
+	"Select an FTI file to load:",
+	<< Modal,
+		Text Box("File to Load:"),
+		Line Up Box(
+			NCol(2),
+			editBox = Text Edit Box(
+				"",
+				Set Width(650)
+			),
+			Button Box(
+				"Browse",
+				Set Script(
+					editBox << Set Text(
+						Pick File(
+							"Something", 				// prompt
+							"Z:\Power\AP Data\FTI\",	// Initial dir
+							{"CSV Files|csv"},			// filter list
+							1,							// First Filter
+							0,							// save flag
+						)
+					)
+				)
+			),
+		),
+	Button Box("OK"),
+	Button Box("Cancel")
+);
+// Stop the script if the user cancels
+If( a["Button"] == -1,
+	Stop()
+);
+
+file_path = editBox << Get Text;
+Show(file_path);
+
+// Verify that we're using a .csv file
+If( Right(file_path, 4) != ".csv",
+	Stop()
+);
+
+// Load the text file so that we can find the data_start line and the
+// header line.
+raw_data = Load Text File(file_path);
+//Show(raw_data);
+
+
+// Search for ",,,,,,,,,Test"  13 characters
+// Search for "Device,Site,X"
+
+// Since I can't seem to find a function that converts a string
+// to a list (like str.split() in Python...), I'll hack one together.
+// Technically it won't split the string into a list, but it will count
+// the number of lines and then it will return values for the header line
+// and the data_start line.
+// This function will iterate through the string, counting CRLFs.
+// If the CRLF is followed by ",,,,,,,,,Test", then that one is
+// set to the col_names_start variable.
+// If the CRLF is followed by "Device,Site,X,Y,", then that one is
+// set to the data_start_line variable and we break the loop.
+col_names_start = -1;
+data_start = -1;
+line_num = 1;
+col_num = 1;
+n = 1;
+prev_str = "";
+start_of_line_string = "";
+start_of_line_bool = 1;
+While(
+	// Run indefinitely
+	1,
+	
+	// Get the current character in the string
+	substring = Substr(raw_data, n, 1);
+	// Show(prev_str||substring);
+
+	// if the previous character and this character make a CRLF, then
+	// we increment our line counter, state that we're at the start
+	// of a line, and reset our column number
+	If(
+		prev_str || substring == "\!N",		// "\!N" matches the host OS's line break character
+		//Show("CRLF Found");
+		line_num ++;
+		start_of_line_bool = 1;
+		col_num = 0;					// Might have to set to -1 - determine later
+		Continue() 						// Don't bother with the rest of the loop
+	);
+
+	// Since I'm only looking at the 1st 13 characters for a match, I consder myself
+	// to be *not* at the start of a line if our column number is > 14. Also reset
+	// the start_of_line_string.
+	If(
+		prev_str || substring == "\!N",
+		start_of_line_string = "";
+	);
+
+	// If we're at the start of a line, I want to collect up to 13 characters
+	// for matching.
+	If(
+		start_of_line_bool,
+		start_of_line_string ||= substring;
+	);
+	If(
+		start_of_line_bool & Length(start_of_line_string) == 10,
+		Show(start_of_line_string);
+	);
+	
+	// Then check if our start of line string matches one of our two searches
+	If(
+		start_of_line_string == ",,,,,,,,,Test",
+		col_names_start = line_num;
+	);
+	If(
+		start_of_line_string == "Device,Site,",
+		data_start = line_num;
+		Break()
+	);
+
+	
+
+
+	// Move to the next character in the string and store the previous character
+	n ++;
+	col_num ++;
+	prev_str = substring;
+
+	// Only here to abort early
+	If(
+		n >= 2500,
+		Break();
+	);
+);
+
+Show(line_num);
+
+Stop();
+
+
+// Open the file into JMP
+Open(
+	file_path,
+	Import Settings(
+		End Of Line( CRLF, CR, LF ),
+		End Of Field( Comma, CSV( 0 ) ),
+		Strip Quotes( 1 ),
+		Use Apostrophe as Quotation Mark( 0 ),
+		Scan Whole File( 1 ),
+		Treat empty columns as numeric( 0 ),
+		CompressNumericColumns( 0 ),
+		CompressCharacterColumns( 0 ),
+		CompressAllowListCheck( 0 ),
+		Labels( 1 ),
+		Column Names Start( 25 ),				// TODO: Need to find the row before file load
+		Data Starts( 60 ), 						// TODO: Need to find the row before file load
+		Lines To Read( "All" ),
+		Year Rule( "20xx" )
+	)
+);
+
+// Rename the columns that have headers not on line 25
+Column("Column 1") << Set Name("Device");
+Column("Column 2") << Set Name("Site");
+Column("Column 3") << Set Name("X");
+Column("Column 4") << Set Name("Y");
+Column("Column 5") << Set Name("Soft Bin");
+Column("Column 6") << Set Name("Hard Bin");
+Column("Column 7") << Set Name("Wafer");
+Column("Column 8") << Set Name("Failed");
+Column("Column 9") << Set Name("Alarmed");
+Column("Test") << Set Name("Message");
+
+// Some columns have value of "infinity", so we need to remove those and set
+// the correct column datatype.
+

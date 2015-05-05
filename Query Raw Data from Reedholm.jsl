@@ -37,8 +37,9 @@ a =	New Window(
 		Button Box( "OK" ),
 		Button Box( "Cancel" )
 );
+// Stop the script if the user cancels
 If( a["Button"] == -1,
-	Throw()
+	Stop()
 );
 
 // Get the contents of the Number Edit Box
