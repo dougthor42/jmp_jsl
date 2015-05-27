@@ -118,69 +118,39 @@ radius2Col << Set Formula(
 );
 radius2Col << EvalFormula;
 
-// Add a Rdson Column.
-rdsonCol = New Column("Rdson");
-rdsonCol << Set Formula(
-	:Result * 324.3
-);
-rdsonCol << EvalFormula;
 /*
-obj = dt1 << Graph Builder(
-	Show Control Panel( 0 ),
-	Variables( X( :Wafer_Name ), Y( :Result ), Overlay( :Test_Name ) ),
-	Elements(
-		Box Plot(
-			X,
-			Y,
-			Legend( 3 ),
-			Jitter( 1 ),
-			Outliers( 1 ),
-			Box Style( "Outlier" )
-		)
-	)
-);
-
-obj << Save Script to DataTable;
-dt1 << Rename Table Property("Graph Builder", "Box Plots by Wafer and TestName");
-
-Graph Builder(
-	Show Control Panel( 0 ),
-	Variables(
-		X( :Name( "X Coord (Column)" ) ),
-		Y( :Name( "Y Coord (Row)" ) ),
-		Wrap( :Wafer_Name ),
-		Color( :Result )
-	),
-	Elements(
-		Points( X, Y, Legend( 1 ), Jitter( 1 ) )
-	),
-	Local Data Filter(
-		Location( {557, 144} ),
-		Mode( Select( 0 ), Show( 1 ), Include( 1 ) ),
-		Add Filter(
-			columns( :Test_Name ),
-			Where( :Test_Name == "HEMT.D.Ron_25.300mm" ),
-			Display( :Test_Name, Size( 204, 38 ), List Display )
-		)
-	),
-	SendToReport(
-		Dispatch(
-			{},
-			"400",
-			ScaleBox,
-			{Legend Model(
-				1,
-				Properties(
-					0,
-					{gradient(
-						{Label Levels(
-							[0.03 0.031 0.032 0.033 0.034 0.035 0.036 0.037 0.038
-							0.039 0.04]
-						)}
-					)}
-				)
-			)}
-		)
-	)
-);
+Start some data cleaning for PCM
 */
+// Select which items I want to remove
+dt1 << Select Where(
+	(:Test_Name != "PCM.CV.Fit.Return.Y-Int" & :Result <= 0)
+	| :Result >= 1e12
+	| :FailCode != 0
+);
+For Each Row(
+	// If an item is selected, then set the hidded and excluded row states.
+	If( Selected( Row State() ) == 1,
+		Hidden( Row State() ) = 1;
+		Excluded( Row State() ) = 1;
+	);
+);
+dt1 << Invert Row Selection;
+
+dt2 = dt1 << Subset(Selected Rows(1));
+
+dt3 = dt2 << Split(
+	Split By( :IntraDie_Name, :Test_Name ),
+	Split( :Result ),
+	Remaining Columns( Keep All ),
+	Copy formula (1),
+	Output Table( Concat(Char(lot_id), " PCM" ))
+);
+
+dt3 << Sort(
+	replace table,
+	By( :Lot_Name, :Wafer_Name, :DieOrder ),
+	Order( Ascending, Ascending, Ascending )
+);
+
+Close(dt2, NoSave);
+Close(dt1, NoSave);

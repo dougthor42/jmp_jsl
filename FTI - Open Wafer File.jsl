@@ -181,8 +181,11 @@ centerXY = Match(
 	"07G11", {29, 21},
 	"07G13", {16.5, 9.5},
 	"07G14", {30.5, 33.5},
-	{2.43, 3.3}
+	{29, 21}
 );
+
+Show(dieSize);
+Show(centerXY);
 
 // Add a Radius (mm) column.
 radiusCol = dt1 << New Column("Radius (mm)");
@@ -205,8 +208,8 @@ radius2Col << EvalFormula;
 
 // Some columns have value of "infinity", so we need to remove those and set
 // the correct column datatype.
-Column("GateCharge_DRDS-6.5") << Data Type ("Numeric");
-Column("GateCharge_DRDS-6.5") << Modeling Type ("Continuous");
+//Column("GateCharge_DRDS-6.5") << Data Type ("Numeric");
+//Column("GateCharge_DRDS-6.5") << Modeling Type ("Continuous");
 
 // Set the Modeling Type of some columns
 Column("Device") << Modeling Type("Ordinal");
