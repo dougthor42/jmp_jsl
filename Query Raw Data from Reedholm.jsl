@@ -118,10 +118,25 @@ radius2Col << Set Formula(
 );
 radius2Col << EvalFormula;
 
+// Add a gate length Column.
+gateLen = Match(
+	mask,
+	"MDH27", 300,
+	"07G11", 120,
+	"07G13", 324.3,
+	"07G14", 65,
+	"07G16", 400,
+	120
+);
+
+gateLenCol = New Column("GateLen");
+gateLenCol << Set Each Value(gateLen);
+gateLenCol << EvalFormula;
+
 // Add a Rdson Column.
 rdsonCol = New Column("Rdson");
 rdsonCol << Set Formula(
-	:Result * 324.3
+	:Result * :gateLen
 );
 rdsonCol << EvalFormula;
 /*
