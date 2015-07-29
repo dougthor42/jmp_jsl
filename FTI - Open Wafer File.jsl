@@ -92,7 +92,7 @@ While(
 		start_of_line_bool = 1;
 		col_num = 1;
 		line_string = "";
-		Continue() 							// Don't bother with the rest of the loop
+		Continue();							// Don't bother with the rest of the loop
 	);
 
 	// Set the previous string and append to the full line string
@@ -101,13 +101,14 @@ While(
 
 	// Then check if our start of line string matches one of our two searches
 	If(
-		Starts With(line_string, ",,,,,,,,,Test") | Starts With(line_string, ",,,,,,Test"),
+		Starts With(line_string, ",,,,,,,,,Test,") | Starts With(line_string, ",,,,,,Test,"),
 		col_names_start = line_num;
+		Continue();
 	);
 	If(
 		Starts With (line_string, "Device,Site,"),
 		data_start = line_num + 1;
-		Break()
+		Break();
 	);
 
 	// Make sure we don't run forever. Used only in development.
@@ -156,7 +157,7 @@ Column("Column 6") << Set Name("Hard Bin");
 Column("Column 7") << Set Name("Wafer");
 Column("Column 8") << Set Name("Failed");
 Column("Column 9") << Set Name("Alarmed");
-Column("Test") << Set Name("Message");
+//Column("Column 10") << Set Name("Message");
 
 
 // Figure out what mask we're using and then set the equation for Radius.
@@ -208,8 +209,8 @@ radius2Col << EvalFormula;
 
 // Some columns have value of "infinity", so we need to remove those and set
 // the correct column datatype.
-Column("GateCharge_DRDS-5.5") << Data Type ("Numeric");
-Column("GateCharge_DRDS-5.5") << Modeling Type ("Continuous");
+//Column("GateCharge_DRDS-8.5") << Data Type ("Numeric");
+//Column("GateCharge_DRDS-8.5") << Modeling Type ("Continuous");
 
 // Set the Modeling Type of some columns
 Column("Device") << Modeling Type("Ordinal");
