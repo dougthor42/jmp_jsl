@@ -28,6 +28,11 @@ a = New Window(
 				)
 			),
 		),
+	Text Box("Identifier Column:"),
+	flagBox = Text Edit Box(
+		"",
+		Set Width(200)
+	),
 	Button Box("OK"),
 	Button Box("Cancel")
 );
@@ -37,7 +42,9 @@ If( a["Button"] == -1,
 );
 
 file_path = editBox << Get Text;
+flag = flagBox << Get Text;
 Show(file_path);
+Show(flag);
 
 // Verify that we're using a .csv file
 If( Right(file_path, 4) != ".csv",
@@ -162,7 +169,9 @@ Column("Column 9") << Set Name("Alarmed");
 
 // Figure out what mask we're using and then set the equation for Radius.
 // Get the Mask Name from the filename.
-mask = Left(dt1 << Get Name(), 5);		// TODO: change to account for arbitrary mask name lengths
+lot = Left(dt1 << Get Name(), 5);		// TODO: change to account for arbitrary mask name lengths
+fullLot = Word(1, dt1 << Get Name(), "_");
+mask = Word(2, dt1 << Get Name(), "_");
 Show(mask);
 
 // Lookup the Die Size (X, Y). Assume 07G11 if not found.
@@ -172,6 +181,9 @@ dieSize = Match(
 	"07G11", {2.43, 3.3},
 	"07G13", {4.37, 6.47},
 	"07G14", {2.33, 2.07},
+	"07G16", {5.02, 8.49},
+	"07G17", {2.9, 3.3},
+	"ECM01", {12.0, 11.0},
 	{2.43, 3.3}
 );
 
@@ -182,7 +194,10 @@ centerXY = Match(
 	"07G11", {29, 21},
 	"07G13", {16.5, 9.5},
 	"07G14", {30.5, 33.5},
-	{29, 21}
+	"07G16", {14.3386, 8.5589},
+	"07G17", {24.431, 20.894},
+	"ECM01", {6, 6.5},
+	{2.43, 3.3}
 );
 
 Show(dieSize);
@@ -207,6 +222,19 @@ radius2Col << Set Formula(
 );
 radius2Col << EvalFormula;
 
+// Add a flag column, but only if the flag field is not empty
+If(
+	// Test
+	flag != "",
+	
+	// True Case
+	flagCol = New Column("StepNum", Character);
+	flagCol << Set Each Value(flag);,
+	
+	// False Case
+	//do nothing
+);
+
 // Some columns have value of "infinity", so we need to remove those and set
 // the correct column datatype.
 //Column("GateCharge_DRDS-8.5") << Data Type ("Numeric");
@@ -215,8 +243,8 @@ radius2Col << EvalFormula;
 // Set the Modeling Type of some columns
 Column("Device") << Modeling Type("Ordinal");
 Column("Site") << Modeling Type("Ordinal");
-Column("X") << Modeling Type("Ordinal");
-Column("Y") << Modeling Type("Ordinal");
+Column("X") << Modeling Type("Continuous");
+Column("Y") << Modeling Type("Continuous");
 Column("Soft Bin") << Modeling Type("Nominal");
 Column("Hard Bin") << Modeling Type("Nominal");
 Column("Wafer") << Modeling Type("Ordinal");

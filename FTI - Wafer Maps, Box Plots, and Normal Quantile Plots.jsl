@@ -1,0 +1,131 @@
+
+// 
+// Plots up Wafer Map, Box Plot, and Normal Quantile Plot for some FTI data.
+//
+//
+//
+
+
+dt1 = Current Data Table();
+
+// Prompt the user to select the item to plot.
+
+r = Column Dialog(
+	Y = Col List(
+		"Y, Parameter",
+		Max Col( 1 ),
+		Min Col( 1 ),
+		ModelingType("Continuous"),
+		DataType("Numeric")
+	),
+	Group = Col List(
+		"Group",
+		Max Col( 1 ),
+		Min Col( 1 ),
+		Columns( :GrowthID )
+	),
+);
+Show(r);
+
+
+// Abort the script if the users says Cancel
+If( r["Button"] == -1,
+	Stop()
+);
+
+yData = r["Y"][1];
+groupData = r["Group"][1];
+
+
+// Determine the plot ranges.
+plotLow = Floor(Col Quantile(yData, 0.1) * 100) / 100;
+plotHigh = Ceiling(Col Quantile(yData, 0.9) * 100) / 100;
+plotRange = Matrix({plotLow, plotHigh});
+colName = yData << Get Name;
+increment = Round((plotHigh - plotLow) / 10);
+
+
+// Plot the Wafer Map
+Graph Builder(
+	Size( 375, 375 ),
+	Show Control Panel( 0 ),
+	Fit to Window( "On" ),
+	Variables(
+		X( :X ),
+		Y( :Y ),
+		Wrap( groupData ),
+		Color( yData )
+	),
+	Elements( Points( X, Y, Legend( 7 ) ) ),
+	SendToReport(
+		Dispatch(
+			{},
+			"Y",
+			ScaleBox,
+			{Min( 20 ), Max( 0 ), Inc( 5 ), Minor Ticks( 4 ), Label Row Nesting( 1 )
+			}
+		),
+		Dispatch(
+			{},
+			"400",
+			ScaleBox,
+			{Legend Model(
+				5,
+				Properties(
+					0,
+					{gradient(
+						{Scale Values( plotRange ),
+						Label Format( "Fixed Dec", 15, 2), N Labels( 9 )}
+					)}
+				)
+			)}
+		),
+		Dispatch(
+			{},
+			"graph title",
+			TextEditBox,
+			{Set Text( colName )}
+		)
+	)
+);
+
+
+// Plot the Box Plots
+Graph Builder(
+	Size( 400, 215 ),
+	Show Control Panel( 0 ),
+	Show Legend( 0 ),
+	Fit to Window( "On" ),
+	Variables( X( groupData ), Y( yData ) ),
+	Elements( Box Plot( X, Y, Legend( 4 ) ) ),
+);
+
+
+
+// Normal Quantile Plot
+Oneway(
+	Y( yData ),
+	X( groupData ),
+	All Graphs( 0 ),
+	Plot Quantile by Actual( 1 ),
+	Line of Fit( 0 ),
+	Points( 0 ),
+	Box Plots( 0 ),
+	Connect Means( 1 ),
+	Histograms( 0 ),
+	SendToReport(
+		Dispatch(
+			{"Normal Quantile Plot"},
+			"1",
+			ScaleBox,
+			{Label Row( {Show Major Grid( 1 ), Show Minor Grid( 1 )} )}
+		),
+		Dispatch( {"Normal Quantile Plot"}, "2", ScaleBox, {Format( "Best", 12 )} ),
+		Dispatch(
+			{"Normal Quantile Plot"},
+			"Oneway QuantilePlot",
+			FrameBox,
+			{Frame Size( 250, 165 ), Marker Size( 1 )}
+		)
+	)
+);

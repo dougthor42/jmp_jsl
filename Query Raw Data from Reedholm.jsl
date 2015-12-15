@@ -2,60 +2,83 @@
 
 Names Default To Here(1);
 
-// Define the DBTool database connection string
+// Define the Reedholm database connection string
 conn = "DSN=Reedholm_x64;UID=owt_read;PWD=owtread;APP=JMP;WSID=THORIUM;DATABASE=RIWEBSQL";
-/*
-Lot_Name = "1405-4";
-Device_Name = "D.SIL6MDH27AAB.Product";
-Process_Name = "P.SIL6MDH27AAB";
-StepName = "PS.6in.M3";
-
-sqlString1 = Concat Items(
-	{"EXECUTE dbo.[_TPH_GetLotID]
-	@Lot_Name = '", Lot_Name, "',
-	@Device_Name = '", Device_Name, "',
-	@Process_Name = '", Process_Name, "',
-	@StepName = '", StepName, "'"}, "");
-
-Show(sqlString1);
-
-dt1 = Open Database(conn, sqlString1, "tempTable");
-
-temp = dt1:Lot_ID[1];
-Close(dt1, No Save);
-*/
-//temp = 10170;
-//Show(temp);
-
 
 // Prompt user for Lot IDs
 a =	New Window(
 		"Enter the Reedholm Lot ID:",
 		<< Modal,
-		Text Box("Enter the Reedholm Lot ID:"),
-		editBox = Number Edit Box(),
+		Text Box(
+		    "Enter the Reedholm Lot ID:
+		    ",
+		    Justify Text ("center"),
+		    Set Width(250)
+		),
+		Text Box(
+			"(Separate multiple Lot IDs with a comma ',')
+			",
+			Justify Text ("center"),
+		    Set Width(250)
+		),
+		editBox = Text Edit Box(),
+		editBox << Set Width(250),
 		Button Box( "OK" ),
 		Button Box( "Cancel" )
 );
 // Stop the script if the user cancels
 If( a["Button"] == -1,
-	Stop()
+	Stop();
 );
 
 // Get the contents of the Number Edit Box
-lot_id = editBox << get;
+lot_id = editBox << get text;
 Show(lot_id);
 
-// Create the SQL string that we're going to execute
-sqlString2 = Concat Items(
-	{"EXECUTE dbo.[_TPH_ExportLotData]
-	@Lot_ID = ", Char(lot_id)},
-	"");
+// Convert the string to a list
+lot_ids = Words(lot_id, ",");
+Show(lot_ids);
 
-Show(sqlString2);
+///////////////////////////////////////////////////////////////
+// Loop over each lot, executing the DB action.
+///////////////////////////////////////////////////////////////
+length = N Items(lot_ids);
+Show(length);
+For(i = 1, i <= length, i++,
+    // Some debugging info.
+	Write("\!N", "lot_ids[", i, "]: ", lot_ids[i]);
 
-// Execute the string into a table with the tablename = lot_id
-dt1 = Open Database(conn, sqlString2, Char(lot_id));
+	// Create the SQL string that we're going to execute
+	sqlString2 = Concat Items(
+		{"EXECUTE dbo.[_TPH_ExportLotData]
+		@Lot_ID = ", Char(lot_ids[i])},
+		"");
+
+	Show(sqlString2);
+	Write("\!N");
+
+	// Execute the string into a table with the tablename = lot_ids[i]
+	if (
+		// Case 1: 1st iteration of the loop - open initial data table
+		i == 1,
+		dt1 = Open Database(conn, sqlString2, Char(lot_ids[i]));
+		dt1 << Delete Table Property("Update From DB"),
+		
+		// Case 2: all subsequent iterations - concatenate
+		i > 1,
+		dt2 = Open Database(conn, sqlString2, Char(lot_ids[i]));
+		dt2 << Delete Table Property("Update From DB");
+		dt1 << Concatenate(dt2, Append to first table);
+		Close(dt2, NoSave);
+	);
+);
+///////////////////////////////////////////////////////////////
+// End Loop
+///////////////////////////////////////////////////////////////
+Write("\!N");
+
+// Rename the 1st table
+dt1 << Set Name(lot_id);
 
 // Take the Die_Name column and parse it for die coords
 xCoordCol = New Column("X Coord (Column)");
@@ -85,6 +108,8 @@ dieSize = Match(
 	"07G13", {4.37, 6.47},
 	"07G14", {2.33, 2.07},
 	"07G16", {5.02, 8.49},
+	"07G17", {2.9, 3.3},
+	"ECM01", {12.0, 11.0},
 	{2.43, 3.3}
 );
 
@@ -96,6 +121,8 @@ centerXY = Match(
 	"07G13", {16.5, 9.5},
 	"07G14", {30.5, 33.5},
 	"07G16", {14.3386, 8.5589},
+	"07G17", {24.431, 20.894},
+	"ECM01", {6, 6.5},
 	{2.43, 3.3}
 );
 
@@ -125,7 +152,9 @@ gateLen = Match(
 	"07G11", 120,
 	"07G13", 324.3,
 	"07G14", 65,
-	"07G16", 400,
+	"07G16", 510,
+	"07G17", 161.7,
+	"ECM01", 1,
 	120
 );
 
@@ -139,63 +168,94 @@ rdsonCol << Set Formula(
 	:Result * :gateLen
 );
 rdsonCol << EvalFormula;
-/*
-obj = dt1 << Graph Builder(
-	Show Control Panel( 0 ),
-	Variables( X( :Wafer_Name ), Y( :Result ), Overlay( :Test_Name ) ),
-	Elements(
-		Box Plot(
-			X,
-			Y,
-			Legend( 3 ),
-			Jitter( 1 ),
-			Outliers( 1 ),
-			Box Style( "Outlier" )
+
+/////////////////////////////////////////////////////////////////////////////
+// Get the Growth IDs (assume things are in WIPTrac)
+/////////////////////////////////////////////////////////////////////////////
+
+// First, get a unique list of substrate IDs
+unique_ids = Associative Array(dt1:Wafer_Name);
+unique_ids = unique_ids << Get Keys;
+
+// Convert the unique ids to a string for SQL
+unique_ids_string = Concat Items(unique_ids, "','");
+unique_ids_string = Concat("('", unique_ids_string, "')");
+Show(unique_ids_string);
+
+// Define the WIPTrac database connection string
+conn = "DSN=PostgreSQL30_x64;
+DATABASE=wiptrac;
+SERVER=192.168.11.30;
+PORT=5432;
+UID=wiptracreader;
+PWD=Trans4m%21;
+CA=d;
+A6=;
+A7=100;
+A8=4096;
+B0=255;
+B1=8190;
+BI=0;
+C2=dd_;
+CX=1c502bb;
+A1=7.4";
+
+// Create the SQL string to execute
+sqlString2 = Concat Items(
+	{"SELECT
+		a.serial_id,
+		a.serial_num,
+		a.vendorserial_num
+	FROM public.serial AS a
+	WHERE a.serial_num IN ",
+	unique_ids_string},
+	""
+	);
+Show(sqlString2);
+
+// Query the database
+dt2 = Open Database(conn, sqlString2, "Wafer IDs");
+
+// Update the 1st table with the growht ID from the query
+dt1 << Update(
+	With( dt2 ),
+	Match Columns( :Wafer_Name = :serial_num ),
+	Add Columns from Update table( :vendorserial_num )
+);
+
+// Rename a column to make things easier.
+dt1:vendorserial_num << Set Name("GrowthID");
+
+// Close the extra table
+Close(dt2, NoSave);
+
+
+/////////////////////////////////////////////////////////////////////////////
+// Split the Data - Generally easier to work with.
+/////////////////////////////////////////////////////////////////////////////
+
+// First, create a new column so that the test order is kept
+testNameCol = dt1 << New Column("TestName");
+testNameCol << Set Formula(
+	Char(:TestOrder) || "~" || :Test_Name
+);
+testNameCol << EvalFormula;
+
+// Now Split the data
+dt2 = dt1 << Split(
+	Split By( :TestName ),
+	Split( :Result ),
+	Output Table( lot_id || " Split" ),
+	Remaining Columns(
+		Drop(
+			:Test_Name,
+			:Test_Version,
+			:Test_ID,
+			:TestOrder,
+			:DataPointID,
+			:ResultStatus,
+			:FailCode,
+			:SysState
 		)
 	)
 );
-
-obj << Save Script to DataTable;
-dt1 << Rename Table Property("Graph Builder", "Box Plots by Wafer and TestName");
-
-Graph Builder(
-	Show Control Panel( 0 ),
-	Variables(
-		X( :Name( "X Coord (Column)" ) ),
-		Y( :Name( "Y Coord (Row)" ) ),
-		Wrap( :Wafer_Name ),
-		Color( :Result )
-	),
-	Elements(
-		Points( X, Y, Legend( 1 ), Jitter( 1 ) )
-	),
-	Local Data Filter(
-		Location( {557, 144} ),
-		Mode( Select( 0 ), Show( 1 ), Include( 1 ) ),
-		Add Filter(
-			columns( :Test_Name ),
-			Where( :Test_Name == "HEMT.D.Ron_25.300mm" ),
-			Display( :Test_Name, Size( 204, 38 ), List Display )
-		)
-	),
-	SendToReport(
-		Dispatch(
-			{},
-			"400",
-			ScaleBox,
-			{Legend Model(
-				1,
-				Properties(
-					0,
-					{gradient(
-						{Label Levels(
-							[0.03 0.031 0.032 0.033 0.034 0.035 0.036 0.037 0.038
-							0.039 0.04]
-						)}
-					)}
-				)
-			)}
-		)
-	)
-);
-*/

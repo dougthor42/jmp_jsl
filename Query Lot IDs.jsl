@@ -10,6 +10,7 @@ sqlString1 = "
 SELECT
 	a.Lot_ID,
 	a.Lot_Name,
+	a.Locked AS 'Complete',
 	b.Device_Name,
 	a.Date_Time,
 	a.Finish_DT,
@@ -24,7 +25,7 @@ INNER JOIN dbo.Device_Names AS b
 ON a.Device_ID = b.Device_ID
 ";
 
-dt1 = Open Database(conn, sqlString1);
+dt1 = Open Database(conn, sqlString1, "Reedholm Lot IDs");
 
 dt1 << Sort(
 	Replace Table,
@@ -32,4 +33,9 @@ dt1 << Sort(
 	Order(Descending)
 	);
 
-dt1 << Delete Table Property("Save To DB")
+dt1 << Delete Table Property("Save To DB");
+
+// Recode the "Complete?" column to Yes (U: Unlocked) and No (E: ???)
+Current Data Table() << Begin Data Update;
+For Each Row( :Complete = Match( :Complete, "U", "Yes", "E", "No", :Complete ) );
+Current Data Table() << End Data Update;
