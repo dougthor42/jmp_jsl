@@ -6,23 +6,31 @@ Names Default to Here(1);
 a = New Window(
 	"Select an FTI file to load:",
 	<< Modal,
+		Text Box("Please have all files be from the same lot. I can't guarentee what happens if they're not...", << Set Wrap(800) ),
+		Text Box(""),
+		
 		Text Box("File to Load:"),
 		Line Up Box(
 			NCol(2),
-			editBox = Text Edit Box(
+			//editBox = Text Edit Box(
+			editBox = List Box(
 				"",
-				Set Width(650)
+				//Set Width(650)
+				width(1200), nlines(8)
 			),
 			Button Box(
 				"Browse",
 				Set Script(
-					editBox << Set Text(
+					//editBox << Set Text(
+					editBox << Set Items(
 						Pick File(
-							"Something", 				// prompt
-							"Z:\Power\AP Data\FTI\",	// Initial dir
+							"Select FTI File(s) to load.",				// prompt
+							"Z:\Manufacturing\Product Engineering\Wafer Probe\Projects\FTI-OWT Yield and Bin Comparison\reorganized_raw_data\",	// Initial dir
 							{"CSV Files|csv"},			// filter list
 							1,							// First Filter
-							0							// save flag
+							0,							// save flag
+							"",							// default file
+							multiple							// multiple
 						)
 					)
 				)
@@ -41,118 +49,183 @@ If( a["Button"] == -1,
 	Stop()
 );
 
-file_path = editBox << Get Text;
+//file_path = editBox << Get Text;
+//flag = flagBox << Get Text;
+//Show(file_path);
+//Show(flag);
+
+file_paths = editBox << Get Items;
 flag = flagBox << Get Text;
-Show(file_path);
+Show(file_paths);
 Show(flag);
 
-// Verify that we're using a .csv file
-If( Right(file_path, 4) != ".csv",
-	Stop()
-);
 
-// Load the text file so that we can find the data_start line and the
-// header line.
-raw_data = Load Text File(file_path);
-//Show(raw_data);
+//////////////////////////////////////////////////////
+//                                                  //
+// Begin Loop for opening all files                 //
+//                                                  //
+//////////////////////////////////////////////////////
+
+num_files = N Items (file_paths);
+tables = {};
+for (i=1, i<=num_files, i++,
+
+	// Set a local variable
+	file_path = file_paths[i];
+
+	// Verify that we're using a .csv file
+	// Not really needed because the Open File dialog limits to .csv
+	If( Right(file_path, 4) != ".csv",
+		Stop()
+	);
+
+	// Load the text file so that we can find the data_start line and the
+	// header line.
+	raw_data = Load Text File(file_path);
+	//Show(raw_data);
 
 
-// Search for ",,,,,,,,,Test"  13 characters
-// Search for "Device,Site,X"
+	// Search for ",,,,,,,,,Test"  13 characters
+	// Search for "Device,Site,X"
 
-// Since I can't seem to find a function that converts a string
-// to a list (like str.split() in Python...), I'll hack one together.
-// Technically it won't split the string into a list, but it will count
-// the number of lines and then it will return values for the header line
-// and the data_start line.
-// This function will iterate through the string, counting CRLFs.
-// If the CRLF is followed by ",,,,,,,,,Test", then that one is
-// set to the col_names_start variable.
-// If the CRLF is followed by "Device,Site,X,Y,", then that one is
-// set to the data_start_line variable and we break the loop.
-col_names_start = -1;
-data_start = -1;
-line_num = 1;
-col_num = 1;
-n = 1;
-prev_str = "";
-line_string = "";
-start_of_line_bool = 1;
-While(
-	// Run indefinitely
-	1,
+	// Since I can't seem to find a function that converts a string
+	// to a list (like str.split() in Python...), I'll hack one together.
+	// Technically it won't split the string into a list, but it will count
+	// the number of lines and then it will return values for the header line
+	// and the data_start line.
+	// This function will iterate through the string, counting CRLFs.
+	// If the CRLF is followed by ",,,,,,,,,Test", then that one is
+	// set to the col_names_start variable.
+	// If the CRLF is followed by "Device,Site,X,Y,", then that one is
+	// set to the data_start_line variable and we break the loop.
+	col_names_start = -1;
+	data_start = -1;
+	line_num = 1;
+	col_num = 1;
+	n = 1;
+	prev_str = "";
+	line_string = "";
+	start_of_line_bool = 1;
+	While(
+		// Run indefinitely
+		1,
+		
+		// Get the current character in the string
+		substring = Substr(raw_data, n, 1);
+
+		// Gotta make sure we increment n, or else we'll look infinitely.
+		n ++;
+		col_num ++;
+
+		// if the previous character and this character make a CRLF, then
+		// we increment our line counter, state that we're at the start
+		// of a line, and reset our column number
+		If(
+			prev_str || substring == "\!N",		// "\!N" matches the host OS's line break character
+			//Print(line_string);
+			line_num ++;
+			start_of_line_bool = 1;
+			col_num = 1;
+			line_string = "";
+			Continue();							// Don't bother with the rest of the loop
+		);
+
+		// Set the previous string and append to the full line string
+		prev_str = substring;
+		line_string ||= substring;
+
+		// Then check if our start of line string matches one of our two searches
+		If(
+			Starts With(line_string, ",,,,,,,,,Test,") | Starts With(line_string, ",,,,,,Test,"),
+			col_names_start = line_num;
+			Continue();
+		);
+		If(
+			Starts With (line_string, "Device,Site,"),
+			data_start = line_num + 1;
+			Break();
+		);
+
+		// Make sure we don't run forever. Used only in development.
+		/*
+		If(
+			n >= 8000,
+			Break();
+		);
+		*/
+	);
+
+	Show(line_num);
+	Show(col_names_start);
+	Show(data_start);
+
+	//Stop();
+
+	// Open the file into JMP
+	dt = Open(
+		file_path,
+		Import Settings(
+			End Of Line( CRLF, CR, LF ),
+			End Of Field( Comma, CSV( 0 ) ),
+			Strip Quotes( 1 ),
+			Use Apostrophe as Quotation Mark( 0 ),
+			Scan Whole File( 1 ),
+			Treat empty columns as numeric( 0 ),
+			CompressNumericColumns( 0 ),
+			CompressCharacterColumns( 0 ),
+			CompressAllowListCheck( 0 ),
+			Labels( 1 ),
+			Column Names Start( col_names_start ),
+			Data Starts( data_start ),
+			Lines To Read( "All" ),
+			Year Rule( "20xx" )
+		)
+	);
 	
-	// Get the current character in the string
-	substring = Substr(raw_data, n, 1);
-
-	// Gotta make sure we increment n, or else we'll look infinitely.
-	n ++;
-	col_num ++;
-
-	// if the previous character and this character make a CRLF, then
-	// we increment our line counter, state that we're at the start
-	// of a line, and reset our column number
-	If(
-		prev_str || substring == "\!N",		// "\!N" matches the host OS's line break character
-		//Print(line_string);
-		line_num ++;
-		start_of_line_bool = 1;
-		col_num = 1;
-		line_string = "";
-		Continue();							// Don't bother with the rest of the loop
-	);
-
-	// Set the previous string and append to the full line string
-	prev_str = substring;
-	line_string ||= substring;
-
-	// Then check if our start of line string matches one of our two searches
-	If(
-		Starts With(line_string, ",,,,,,,,,Test,") | Starts With(line_string, ",,,,,,Test,"),
-		col_names_start = line_num;
-		Continue();
-	);
-	If(
-		Starts With (line_string, "Device,Site,"),
-		data_start = line_num + 1;
-		Break();
-	);
-
-	// Make sure we don't run forever. Used only in development.
+	// Append the data table to the list of tables.
+	Insert Into(tables, dt);
+	//Close(dt1, NoSave);
+	
 	/*
-	If(
-		n >= 8000,
-		Break();
+	if (
+		// Case 1: 1st iteration of the loop - open initial data table
+		i == 1,
+		dt1 = dt;
+		//Close(dt1, NoSave);
+		,
+		
+		// Case 2: all subsequent iterations - concatenate
+		i > 1,
+		dt2 = dt;
+		dt1 << Concatenate(dt2, Append to first table, Create source column);
+		Close(dt2, NoSave);
 	);
 	*/
+
 );
 
-Show(line_num);
-Show(col_names_start);
-Show(data_start);
+///////////// End Loop for opening all files //////////////////////
 
-//Stop();
 
-// Open the file into JMP
-dt1 = Open(
-	file_path,
-	Import Settings(
-		End Of Line( CRLF, CR, LF ),
-		End Of Field( Comma, CSV( 0 ) ),
-		Strip Quotes( 1 ),
-		Use Apostrophe as Quotation Mark( 0 ),
-		Scan Whole File( 1 ),
-		Treat empty columns as numeric( 0 ),
-		CompressNumericColumns( 0 ),
-		CompressCharacterColumns( 0 ),
-		CompressAllowListCheck( 0 ),
-		Labels( 1 ),
-		Column Names Start( col_names_start ),
-		Data Starts( data_start ),
-		Lines To Read( "All" ),
-		Year Rule( "20xx" )
-	)
+Show(tables);
+dt1 = tables[1];
+
+// If we have multiple tables, concatenate them together.
+if(N Items(tables) > 1,
+	Remove From(tables, 1);
+	dt1 << Concatenate(tables, Append to first table, Create source column);
+
+	// Close the extra tables
+	for (i = 1, i <= N Items (tables), i++,
+		Close(tables[i], NoSave);
+	);
+
+	// Rename the table
+	table_name = Left(dt1 << Get Name(), 5) || ", Multiple Files";
+	dt1 << Set Name(table_name);
 );
+
+Show(dt1);
 
 // Rename the columns that have headers not on line 25
 Column("Column 1") << Set Name("Device");
